@@ -96,7 +96,7 @@ module "eks" {
   source          = "terraform-aws-modules/eks/aws"
   version         = "20.31.6"
   cluster_name    = var.stack_name
-  cluster_version = "1.29"
+  cluster_version = "1.30"
   create          = var.stack_create
   # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
   create_node_security_group      = false
