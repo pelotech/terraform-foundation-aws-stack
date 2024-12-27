@@ -1,0 +1,15 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: terraform-foundation-aws-stack
+  description: Terraform modules to bootstrap k8s cluster in aws
+  tags:
+    - terraform
+    - k8s
+  annotations:
+    github.com/project-slug: pelotech/terraform-foundation-aws-stack
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: infrastructure
+  lifecycle: production
+  owner: group:pelotech/leads

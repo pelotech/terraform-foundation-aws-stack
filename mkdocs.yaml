@@ -1,0 +1,7 @@
+site_name: terraform-foundation-aws-stack
+site_description: Terraform modules for bootstraping aws stack
+nav:
+  - Home: README.md
+
+plugins:
+  - techdocs-core
