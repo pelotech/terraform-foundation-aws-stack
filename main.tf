@@ -56,7 +56,7 @@ locals {
 
 module "vpc" {
   source                                 = "terraform-aws-modules/vpc/aws"
-  version                                = "5.17.0"
+  version                                = "5.18.1"
   name                                   = var.stack_name
   enable_dns_hostnames                   = "true"
   enable_dns_support                     = "true"
