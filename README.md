@@ -3,6 +3,7 @@
 # Foundation - Pelotech's GitOps K8s Cluster
 This is the terraform module that helps bootstrap foundation in AWS
 
+This project uses [release-please](https://github.com/googleapis/release-please) for the release flow of contributions
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
