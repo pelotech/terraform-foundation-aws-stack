@@ -1,8 +1,7 @@
 {
   extends: [
     "config:recommended",
-    ":semanticCommitTypeAll(deps)",
-    ":semanticCommitScopeDisabled"
+    ":semanticCommitTypeAll(fix)",
   ],
   dependencyDashboard: true,
 }
