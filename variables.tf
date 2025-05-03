@@ -8,6 +8,11 @@ variable "stack_create" {
   default     = true
   description = "should resources be created"
 }
+variable "eks_cluster_version" {
+  type = string
+  default = "1.31"
+  description = "Kubernetes version to set for the cluster"
+}
 variable "stack_tags" {
   type = map(any)
   default = {
@@ -16,6 +21,15 @@ variable "stack_tags" {
   }
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
+variable "stack_existing_vpc_config" {
+  type = object({
+    vpc_id = string
+    subnet_ids = list(string)
+  })
+  default = null
+  description = "Setting the VPC"
+}
+
 variable "stack_vpc_block" {
   type = object({
     cidr             = string
@@ -143,6 +157,6 @@ variable "s3_csi_driver_bucket_arns" {
 }
 variable "vpc_endpoints" {
   type        = list(string)
-  description = "vpc endpoints within the cluster vpc network"
+  description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
