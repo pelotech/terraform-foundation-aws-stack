@@ -58,6 +58,7 @@ module "vpc" {
   source                                 = "terraform-aws-modules/vpc/aws"
   version                                = "5.21.0"
   name                                   = var.stack_name
+  create_vpc                             = var.stack_existing_vpc_config == null
   enable_dns_hostnames                   = "true"
   enable_dns_support                     = "true"
   enable_nat_gateway                     = "true"
@@ -86,7 +87,7 @@ data "aws_region" "current" {}
 
 # https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/using-govcloud-vpc-endpoints.html
 resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
-  for_each     = toset(var.vpc_endpoints)
+  for_each     = var.stack_existing_vpc_config == null ? toset(var.vpc_endpoints) : []
   vpc_id       = module.vpc.vpc_id
   service_name = "com.amazonaws.${data.aws_region.current.name}.${each.value}"
   tags         = var.stack_tags
@@ -96,7 +97,7 @@ module "eks" {
   source          = "terraform-aws-modules/eks/aws"
   version         = "20.36.0"
   cluster_name    = var.stack_name
-  cluster_version = "1.31"
+  cluster_version = var.eks_cluster_version
   create          = var.stack_create
   # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
   create_node_security_group      = false
@@ -104,8 +105,8 @@ module "eks" {
   cluster_endpoint_public_access  = true
   cluster_enabled_log_types       = []
 
-  subnet_ids     = module.vpc.private_subnets
-  vpc_id         = module.vpc.vpc_id
+  vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
+  subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
   create_kms_key = true
   enable_irsa    = true
   #    cluster_encryption_config = [{
