@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.2.1...v1.3.0) (2025-05-03)
+
+
+### Features
+
+* add configuration of eks version and ability to use existing VPC for cluster ([#23](https://github.com/pelotech/terraform-foundation-aws-stack/issues/23)) ([5db66fc](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5db66fcf142e63a2d57827174f515e2bf354458c))
+
 ## [1.2.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.2.0...v1.2.1) (2025-05-03)
 
 
