@@ -58,7 +58,7 @@ module "vpc" {
   source                                 = "terraform-aws-modules/vpc/aws"
   version                                = "5.21.0"
   name                                   = var.stack_name
-  create_vpc = var.stack_existing_vpc_config == null
+  create_vpc                             = var.stack_existing_vpc_config == null
   enable_dns_hostnames                   = "true"
   enable_dns_support                     = "true"
   enable_nat_gateway                     = "true"

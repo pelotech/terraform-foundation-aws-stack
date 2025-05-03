@@ -9,8 +9,8 @@ variable "stack_create" {
   description = "should resources be created"
 }
 variable "eks_cluster_version" {
-  type = string
-  default = "1.31"
+  type        = string
+  default     = "1.31"
   description = "Kubernetes version to set for the cluster"
 }
 variable "stack_tags" {
@@ -23,10 +23,10 @@ variable "stack_tags" {
 }
 variable "stack_existing_vpc_config" {
   type = object({
-    vpc_id = string
+    vpc_id     = string
     subnet_ids = list(string)
   })
-  default = null
+  default     = null
   description = "Setting the VPC"
 }
 
