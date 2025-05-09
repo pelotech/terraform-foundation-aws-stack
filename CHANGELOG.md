@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.3.0...v1.3.1) (2025-05-09)
+
+
+### Bug Fixes
+
+* add outputs to support out of band IRSA configuration and update docs ([7d310bc](https://github.com/pelotech/terraform-foundation-aws-stack/commit/7d310bc1bd6f9d1e58736ef8c9dd94ae55fb1777))
+
 ## [1.3.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.2.1...v1.3.0) (2025-05-03)
 
 
