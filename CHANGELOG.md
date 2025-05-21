@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.3.1...v1.3.2) (2025-05-21)
+
+
+### Bug Fixes
+
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v4.9.0 ([#26](https://github.com/pelotech/terraform-foundation-aws-stack/issues/26)) ([cfda7e5](https://github.com/pelotech/terraform-foundation-aws-stack/commit/cfda7e56350686ddff75bbbb5bfb83e18b0e22dc))
+
 ## [1.3.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.3.0...v1.3.1) (2025-05-09)
 
 
