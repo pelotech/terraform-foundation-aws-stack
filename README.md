@@ -27,6 +27,7 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 | <a name="module_ebs_csi_driver_irsa_role"></a> [ebs\_csi\_driver\_irsa\_role](#module\_ebs\_csi\_driver\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | 5.55.0 |
 | <a name="module_eks"></a> [eks](#module\_eks) | terraform-aws-modules/eks/aws | 20.36.0 |
 | <a name="module_external_dns_irsa_role"></a> [external\_dns\_irsa\_role](#module\_external\_dns\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | 5.55.0 |
+| <a name="module_fck_nat"></a> [fck\_nat](#module\_fck\_nat) | RaJiska/fck-nat/aws | 1.3.0 |
 | <a name="module_karpenter"></a> [karpenter](#module\_karpenter) | terraform-aws-modules/eks/aws//modules/karpenter | 20.36.0 |
 | <a name="module_load_balancer_controller_irsa_role"></a> [load\_balancer\_controller\_irsa\_role](#module\_load\_balancer\_controller\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | 5.55.0 |
 | <a name="module_s3_csi"></a> [s3\_csi](#module\_s3\_csi) | terraform-aws-modules/s3-bucket/aws | 4.8.0 |
@@ -60,6 +61,8 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 | <a name="input_stack_ci_ro_arn"></a> [stack\_ci\_ro\_arn](#input\_stack\_ci\_ro\_arn) | arn to the ci role for planning on PRs | `string` | n/a | yes |
 | <a name="input_stack_create"></a> [stack\_create](#input\_stack\_create) | should resources be created | `bool` | `true` | no |
 | <a name="input_stack_existing_vpc_config"></a> [stack\_existing\_vpc\_config](#input\_stack\_existing\_vpc\_config) | Setting the VPC | <pre>object({<br/>    vpc_id     = string<br/>    subnet_ids = list(string)<br/>  })</pre> | `null` | no |
+| <a name="input_stack_fck_nat_enabled"></a> [stack\_fck\_nat\_enabled](#input\_stack\_fck\_nat\_enabled) | Use fck nat to save not managed nat cost | `bool` | `false` | no |
+| <a name="input_stack_fck_nat_instance_type"></a> [stack\_fck\_nat\_instance\_type](#input\_stack\_fck\_nat\_instance\_type) | choose instance based on bandwitch requirements | `string` | `"t3.micro"` | no |
 | <a name="input_stack_name"></a> [stack\_name](#input\_stack\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_stack_ro_arns"></a> [stack\_ro\_arns](#input\_stack\_ro\_arns) | arn to the roles for the cluster read only role | `list(string)` | `[]` | no |
 | <a name="input_stack_tags"></a> [stack\_tags](#input\_stack\_tags) | tags to be added to the stack, should at least have Owner and Environment | `map(any)` | <pre>{<br/>  "Environment": "prod",<br/>  "Owner": "pelotech"<br/>}</pre> | no |
