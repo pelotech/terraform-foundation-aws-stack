@@ -21,6 +21,16 @@ variable "stack_tags" {
   }
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
+variable "stack_fck_nat_enabled" {
+  type = bool
+  default = false
+  description = "Use fck nat to save not managed nat cost"
+}
+variable "stack_fck_nat_instance_type" {
+  type = string
+  default = "t3.micro"
+  description = "choose instance based on bandwitch requirements"
+}
 variable "stack_existing_vpc_config" {
   type = object({
     vpc_id     = string

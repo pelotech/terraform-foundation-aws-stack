@@ -61,8 +61,8 @@ module "vpc" {
   create_vpc                             = var.stack_existing_vpc_config == null
   enable_dns_hostnames                   = "true"
   enable_dns_support                     = "true"
-  enable_nat_gateway                     = "true"
-  one_nat_gateway_per_az                 = "true"
+  enable_nat_gateway                     = var.stack_fck_nat_enabled != true
+  one_nat_gateway_per_az                 = var.stack_fck_nat_enabled != true
   cidr                                   = var.stack_vpc_block.cidr
   azs                                    = var.stack_vpc_block.azs
   private_subnets                        = var.stack_vpc_block.private_subnets
@@ -81,6 +81,28 @@ module "vpc" {
   }
   tags = merge(var.stack_tags, {
   })
+}
+module "fck_nat" {
+  source   = "RaJiska/fck-nat/aws"
+  version = "1.3.0"
+  count = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
+
+  name      = "${var.stack_name}-${module.vpc.azs[count.index]}"
+  vpc_id    = module.vpc.vpc_id
+  subnet_id = module.vpc.public_subnets[count.index]
+  # TODO: look to enable ha/agent/spot
+  # ha_mode              = true
+  # use_cloudwatch_agent = true
+  # use_spot_instances   = true
+  instance_type        = var.stack_fck_nat_instance_type
+  update_route_tables = true
+  route_tables_ids = {
+    private = module.vpc.private_route_table_ids[count.index]
+  }
+
+  tags = {
+    Name = "${var.stack_name}-${module.vpc.azs[count.index]}"
+  }
 }
 
 data "aws_region" "current" {}
