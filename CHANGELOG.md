@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.3.3...v1.4.0) (2025-06-22)
+
+
+### Features
+
+* add the ability to use fck-nat instead of the nat-gateway ([#36](https://github.com/pelotech/terraform-foundation-aws-stack/issues/36)) ([6821712](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6821712c05aa9bc5939cadfd0f101375b0558d31))
+
+
+### Bug Fixes
+
+* **deps:** update terraform terraform-aws-modules/eks/aws to v20.37.1 ([#34](https://github.com/pelotech/terraform-foundation-aws-stack/issues/34)) ([47d8105](https://github.com/pelotech/terraform-foundation-aws-stack/commit/47d81059b7fbdb14931d5674ab1619d372663854))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v4.11.0 ([#33](https://github.com/pelotech/terraform-foundation-aws-stack/issues/33)) ([5e8c509](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5e8c509eeeb17d5cf6e80047498b6336c01df38b))
+
 ## [1.3.3](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.3.2...v1.3.3) (2025-06-10)
 
 
