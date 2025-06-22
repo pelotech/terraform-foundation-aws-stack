@@ -83,9 +83,9 @@ module "vpc" {
   })
 }
 module "fck_nat" {
-  source   = "RaJiska/fck-nat/aws"
+  source  = "RaJiska/fck-nat/aws"
   version = "1.3.0"
-  count = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
+  count   = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
 
   name      = "${var.stack_name}-${module.vpc.azs[count.index]}"
   vpc_id    = module.vpc.vpc_id
@@ -94,7 +94,7 @@ module "fck_nat" {
   # ha_mode              = true
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
-  instance_type        = var.stack_fck_nat_instance_type
+  instance_type       = var.stack_fck_nat_instance_type
   update_route_tables = true
   route_tables_ids = {
     private = module.vpc.private_route_table_ids[count.index]
