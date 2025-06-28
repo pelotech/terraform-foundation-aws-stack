@@ -52,6 +52,16 @@ locals {
     }
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
+  pre_bootstrap_user_data = <<-EOT
+        #!/bin/bash
+        set -ex
+        cat <<-EOF > /etc/profile.d/bootstrap.sh
+        export USE_MAX_PODS=false
+        export KUBELET_EXTRA_ARGS="--max-pods=110"
+        EOF
+        # Source extra environment variables in bootstrap script
+        sed -i '/^set -o errexit/a\\nsource /etc/profile.d/bootstrap.sh' /etc/eks/bootstrap.sh
+        EOT
 }
 
 module "vpc" {
@@ -129,22 +139,25 @@ module "eks" {
 
   vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
   subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
-  create_kms_key = true
+  create_kms_key = var.stack_enable_cluster_kms
   enable_irsa    = true
-  #    cluster_encryption_config = [{
-  #      resources = ["secrets"]
-  #    }]
-  kms_key_administrators = concat(var.stack_admin_arns, [var.stack_ci_admin_arn, var.stack_ci_ro_arn])
-  eks_managed_node_groups = {
+  cluster_encryption_config = var.stack_enable_cluster_kms ? {
+    "resources": [
+      "secrets"
+    ]
+  } : {}
+  kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, [var.stack_ci_admin_arn, var.stack_ci_ro_arn]) : []
+  eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
     "initial-${var.stack_name}" = {
       iam_role_use_name_prefix = false
       instance_types           = var.initial_instance_types
       min_size                 = var.initial_node_min_size
       max_size                 = var.initial_node_max_size
       desired_size             = var.initial_node_desired_size
+      ami_type                 = "AL2_x86_64"
       capacity_type            = "ON_DEMAND"
       labels                   = var.initial_node_labels
-      bootstrap_extra_args     = "--use-max-pods false"
+      pre_bootstrap_user_data  = var.stack_use_vpc_cni_max_pods ? "" : local.pre_bootstrap_user_data
       block_device_mappings = {
         xvda = {
           device_name = "/dev/xvda"
@@ -158,7 +171,7 @@ module "eks" {
       }
       taints = var.initial_node_taints
     }
-  }
+  } : {}
   access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.extra_access_entries)
   tags = merge(var.stack_tags, {
     # NOTE - if creating multiple security groups with this module, only tag the
