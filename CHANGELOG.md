@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v2.0.0...v3.0.0) (2025-06-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* upgrade to eks 1.33 as well as al2023 instead of al2 ([#41](https://github.com/pelotech/terraform-foundation-aws-stack/issues/41))
+
+### Features
+
+* upgrade to eks 1.33 as well as al2023 instead of al2 ([#41](https://github.com/pelotech/terraform-foundation-aws-stack/issues/41)) ([27a097b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/27a097b4d5947381dbb2431a2dd688a6e45c9a58))
+
 ## [2.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.4.0...v2.0.0) (2025-06-28)
 
 
