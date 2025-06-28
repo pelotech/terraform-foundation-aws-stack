@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.4.0...v2.0.0) (2025-06-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* upgrade the cluster to 1.32 as well as set the max pods to 110 ([#39](https://github.com/pelotech/terraform-foundation-aws-stack/issues/39))
+
+### Features
+
+* upgrade the cluster to 1.32 as well as set the max pods to 110 ([#39](https://github.com/pelotech/terraform-foundation-aws-stack/issues/39)) ([eaa8b38](https://github.com/pelotech/terraform-foundation-aws-stack/commit/eaa8b388bea929880ea67b1d4d6d46c566b15eab))
+
 ## [1.4.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v1.3.3...v1.4.0) (2025-06-22)
 
 
