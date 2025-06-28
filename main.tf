@@ -52,16 +52,21 @@ locals {
     }
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
-  pre_bootstrap_user_data = <<-EOT
-        #!/bin/bash
-        set -ex
-        cat <<-EOF > /etc/profile.d/bootstrap.sh
-        export USE_MAX_PODS=false
-        export KUBELET_EXTRA_ARGS="--max-pods=110"
-        EOF
-        # Source extra environment variables in bootstrap script
-        sed -i '/^set -o errexit/a\\nsource /etc/profile.d/bootstrap.sh' /etc/eks/bootstrap.sh
-        EOT
+  # See https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/
+  cloudinit_pre_nodeadm = [
+    {
+      content_type = "application/node.eks.aws"
+      content      = <<-EOT
+            ---
+            apiVersion: node.eks.aws/v1alpha1
+            kind: NodeConfig
+            spec:
+              kubelet:
+                config:
+                  maxPods: 110
+          EOT
+    }
+  ]
 }
 
 module "vpc" {
@@ -154,10 +159,10 @@ module "eks" {
       min_size                 = var.initial_node_min_size
       max_size                 = var.initial_node_max_size
       desired_size             = var.initial_node_desired_size
-      ami_type                 = "AL2_x86_64"
+      ami_type                 = "AL2023_x86_64_STANDARD"
       capacity_type            = "ON_DEMAND"
       labels                   = var.initial_node_labels
-      pre_bootstrap_user_data  = var.stack_use_vpc_cni_max_pods ? "" : local.pre_bootstrap_user_data
+      cloudinit_pre_nodeadm  = var.stack_use_vpc_cni_max_pods ? [] : local.cloudinit_pre_nodeadm
       block_device_mappings = {
         xvda = {
           device_name = "/dev/xvda"
