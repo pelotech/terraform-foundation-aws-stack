@@ -22,14 +22,17 @@ variable "stack_tags" {
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
 variable "stack_use_vpc_cni_max_pods" {
+  type = bool
   default = false
   description = "Set to true if using the vpc cni - otherwise defaults to 110 max pods"
 }
 variable "stack_enable_cluster_kms" {
+  type = bool
   default = true
   description = "Should secrets be encrypted by kms in the cluster"
 }
 variable "stack_enable_default_eks_managed_node_group" {
+  type = bool
   default = true
   description = "Ability to disable default node group"
 }
