@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v3.0.0...v4.0.0) (2025-07-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* make extra entries more flexible and remove redundant ci arns for the entries ([#45](https://github.com/pelotech/terraform-foundation-aws-stack/issues/45))
+
+### Features
+
+* make extra entries more flexible and remove redundant ci arns for the entries ([#45](https://github.com/pelotech/terraform-foundation-aws-stack/issues/45)) ([decaf67](https://github.com/pelotech/terraform-foundation-aws-stack/commit/decaf679a4426906302a3abbbf5bcc4a260adf99))
+
+
+### Bug Fixes
+
+* **deps:** update terraform terraform-aws-modules/eks/aws to v20.37.2 ([#44](https://github.com/pelotech/terraform-foundation-aws-stack/issues/44)) ([c113b70](https://github.com/pelotech/terraform-foundation-aws-stack/commit/c113b705195a7b2aa272c29e7d50f643946fefb9))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v5.59.0 ([#43](https://github.com/pelotech/terraform-foundation-aws-stack/issues/43)) ([54cb519](https://github.com/pelotech/terraform-foundation-aws-stack/commit/54cb519c9757e5f9bb813de6926cef9b500f3a1e))
+
 ## [3.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v2.0.0...v3.0.0) (2025-06-28)
 
 
