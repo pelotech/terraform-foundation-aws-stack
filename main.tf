@@ -37,19 +37,7 @@ locals {
     }
   }
   extra_access_entries = {
-    for index, item in var.extra_access_entries : "extra_${index}" => {
-      principal_arn     = item.principal_arn
-      kubernetes_groups = item.kubernetes_groups
-      policy_associations = {
-        extra_association = {
-          policy_arn = item.policy_arn
-          access_scope = {
-            type       = item.access_scope_type
-            namespaces = item.access_scope_namespaces
-          }
-        }
-      }
-    }
+    for index, item in var.extra_access_entries : "extra_${index}" => item
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
   # See https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/
