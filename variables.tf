@@ -77,37 +77,35 @@ variable "extra_access_entries" {
   type = list(object({
     principal_arn           = string
     kubernetes_groups       = optional(list(string))
-    policy_arn              = string
-    access_scope_type       = string
-    access_scope_namespaces = optional(list(string))
+    policy_associations     = optional(map(object({
+      policy_arn              = string
+      access_scope = object({
+        type = string
+        namespaces = optional(list(string))
+      })
+    })),{})
+
   }))
   description = "EKS access entries needed by IAM roles interacting with this cluster"
   default     = []
 
   validation {
-    error_message = "Access scope type can only be 'namespace' or 'cluster'"
+    error_message = "The access scope type can only be 'namespace' or 'cluster'"
     condition = alltrue([
-      for v in var.extra_access_entries : contains(["namespace", "cluster"], v.access_scope_type)
+      for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
+          for policy in values(entry.policy_associations) : contains(["namespace", "cluster"], policy.access_scope.type)
+      ]))
     ])
   }
 
   validation {
-    error_message = "The access scope type 'namespace' requires 'access_scope_namespaces', namespaces can't be set otherwise."
+    error_message = "The access scope type 'namespace' requires 'namespaces', namespaces can't be set otherwise."
     condition = alltrue([
-      for v in var.extra_access_entries : ((v.access_scope_type == "namespace" && v.access_scope_namespaces != null) || (v.access_scope_type != "namespace" && v.access_scope_namespaces == null))
+      for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
+        for policy in values(entry.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) ||  policy.access_scope.type == "cluster" && policy.access_scope.namespace == null)
+      ]))
     ])
   }
-}
-
-variable "stack_ci_admin_arn" {
-  type        = string
-  description = "arn to the ci role"
-}
-
-# TODO: find a cleaner way for KMS access to be able to run plans on the module
-variable "stack_ci_ro_arn" {
-  type        = string
-  description = "arn to the ci role for planning on PRs"
 }
 
 variable "stack_admin_arns" {
@@ -119,7 +117,7 @@ variable "stack_admin_arns" {
 variable "stack_ro_arns" {
   type        = list(string)
   default     = []
-  description = "arn to the roles for the cluster read only role"
+  description = "arn to the roles for the cluster read only role, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries"
 }
 
 variable "initial_node_taints" {

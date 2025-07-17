@@ -11,7 +11,7 @@ data "aws_partition" "current" {}
 
 locals {
   admin_access_entries = {
-    for index, item in concat(var.stack_admin_arns, [var.stack_ci_admin_arn]) : "admin_${index}" => {
+    for index, item in var.stack_admin_arns : "admin_${index}" => {
       principal_arn = item
       policy_associations = {
         cluster_admin = {
@@ -24,7 +24,7 @@ locals {
     }
   }
   ro_access_entries = {
-    for index, item in concat(var.stack_ro_arns, [var.stack_ci_ro_arn]) : "ro_${index}" => {
+    for index, item in var.stack_ro_arns : "ro_${index}" => {
       principal_arn = item
       policy_associations = {
         view_only = {
@@ -37,19 +37,7 @@ locals {
     }
   }
   extra_access_entries = {
-    for index, item in var.extra_access_entries : "extra_${index}" => {
-      principal_arn     = item.principal_arn
-      kubernetes_groups = item.kubernetes_groups
-      policy_associations = {
-        extra_association = {
-          policy_arn = item.policy_arn
-          access_scope = {
-            type       = item.access_scope_type
-            namespaces = item.access_scope_namespaces
-          }
-        }
-      }
-    }
+    for index, item in var.extra_access_entries : "extra_${index}" => item
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
   # See https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/
@@ -151,7 +139,7 @@ module "eks" {
       "secrets"
     ]
   } : {}
-  kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, [var.stack_ci_admin_arn, var.stack_ci_ro_arn]) : []
+  kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_ro_arns) : []
   eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
     "initial-${var.stack_name}" = {
       iam_role_use_name_prefix = false
