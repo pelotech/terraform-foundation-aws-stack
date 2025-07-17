@@ -102,7 +102,7 @@ variable "extra_access_entries" {
     error_message = "The access scope type 'namespace' requires 'namespaces', namespaces can't be set otherwise."
     condition = alltrue([
       for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
-        for policy in values(entry.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) ||  policy.access_scope.type == "cluster" && policy.access_scope.namespace == null)
+        for policy in values(entry.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) ||  policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
       ]))
     ])
   }
