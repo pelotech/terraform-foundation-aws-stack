@@ -108,17 +108,6 @@ variable "extra_access_entries" {
   }
 }
 
-variable "stack_ci_admin_arn" {
-  type        = string
-  description = "arn to the ci role"
-}
-
-# TODO: find a cleaner way for KMS access to be able to run plans on the module
-variable "stack_ci_ro_arn" {
-  type        = string
-  description = "arn to the ci role for planning on PRs"
-}
-
 variable "stack_admin_arns" {
   type        = list(string)
   default     = []
@@ -128,7 +117,7 @@ variable "stack_admin_arns" {
 variable "stack_ro_arns" {
   type        = list(string)
   default     = []
-  description = "arn to the roles for the cluster read only role"
+  description = "arn to the roles for the cluster read only role, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries"
 }
 
 variable "initial_node_taints" {
