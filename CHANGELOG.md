@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.0...v4.0.1) (2025-07-17)
+
+
+### Bug Fixes
+
+* fix typo in variable validation namespace instead of namespaces ([#47](https://github.com/pelotech/terraform-foundation-aws-stack/issues/47)) ([bf0a156](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bf0a156f92265ec9583e291b74411f9e4dddcdcb))
+
 ## [4.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v3.0.0...v4.0.0) (2025-07-17)
 
 
