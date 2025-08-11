@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.1...v4.0.2) (2025-08-11)
+
+
+### Bug Fixes
+
+* **deps:** update actions/checkout action to v5 ([#53](https://github.com/pelotech/terraform-foundation-aws-stack/issues/53)) ([8f5f860](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8f5f8609e9e7bc8049119317594eb8ce65d46a6c))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.42.0 ([#50](https://github.com/pelotech/terraform-foundation-aws-stack/issues/50)) ([89538e6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/89538e658c6c400da97c3270482a5de9e5228417))
+
 ## [4.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.0...v4.0.1) (2025-07-17)
 
 
