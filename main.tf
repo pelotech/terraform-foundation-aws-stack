@@ -87,7 +87,7 @@ module "vpc" {
 }
 module "fck_nat" {
   source  = "RaJiska/fck-nat/aws"
-  version = "1.3.0"
+  version = "1.4.0"
   count   = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
 
   name      = "${var.stack_name}-${module.vpc.azs[count.index]}"
