@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.0.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.1...v4.0.2) (2025-09-06)
+
+
+### Bug Fixes
+
+* allow for created vpc to be output ([4c49fc9](https://github.com/pelotech/terraform-foundation-aws-stack/commit/4c49fc9c71ff10bde579428f59b4f24af0edcf70))
+* **deps:** update actions/checkout action to v5 ([#53](https://github.com/pelotech/terraform-foundation-aws-stack/issues/53)) ([8f5f860](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8f5f8609e9e7bc8049119317594eb8ce65d46a6c))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v5.60.0 ([#51](https://github.com/pelotech/terraform-foundation-aws-stack/issues/51)) ([e399954](https://github.com/pelotech/terraform-foundation-aws-stack/commit/e399954dbd15742997023237abfabcf613684481))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.42.0 ([#50](https://github.com/pelotech/terraform-foundation-aws-stack/issues/50)) ([89538e6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/89538e658c6c400da97c3270482a5de9e5228417))
+
+
+### Chores
+
+* update release please to include more change log sections ([96422f9](https://github.com/pelotech/terraform-foundation-aws-stack/commit/96422f9730fbf4f273486383ae5d6a54403969b1))
+
 ## [4.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.0...v4.0.1) (2025-07-17)
 
 
