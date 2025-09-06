@@ -15,3 +15,10 @@ output "eks_cluster_tls_certificate_sha1_fingerprint" {
   description = "The SHA1 fingerprint of the public key of the cluster's certificate"
   value       = module.eks.cluster_tls_certificate_sha1_fingerprint
 }
+################################################################################
+# VPC
+################################################################################
+output "vpc" {
+  description = "The vpc object when it's created"
+  value = module.vpc
+}
