@@ -1,5 +1,17 @@
 # Changelog
 
+## [5.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.0...v5.0.1) (2025-09-27)
+
+
+### Bug Fixes
+
+* remove malformed resource and add option for hack to upgrade ([#62](https://github.com/pelotech/terraform-foundation-aws-stack/issues/62)) ([1294710](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1294710722b1430d6df0605debada05c645f6ee9))
+
+
+### Chores
+
+* upgrade vpc, fck_nat, and s3 bucket modules ([#64](https://github.com/pelotech/terraform-foundation-aws-stack/issues/64)) ([1f9d387](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1f9d387f4219fde16c2793462a408e7d4a134c5b))
+
 ## [5.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.2...v5.0.0) (2025-09-27)
 
 
