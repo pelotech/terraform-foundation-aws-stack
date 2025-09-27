@@ -59,7 +59,7 @@ locals {
 
 module "vpc" {
   source                                 = "terraform-aws-modules/vpc/aws"
-  version                                = "5.21.0"
+  version                                = "6.3.0"
   name                                   = var.stack_name
   create_vpc                             = var.stack_existing_vpc_config == null
   enable_dns_hostnames                   = "true"
@@ -87,7 +87,7 @@ module "vpc" {
 }
 module "fck_nat" {
   source  = "RaJiska/fck-nat/aws"
-  version = "1.3.0"
+  version = "1.4.0"
   count   = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
 
   name      = "${var.stack_name}-${module.vpc.azs[count.index]}"
@@ -142,9 +142,6 @@ module "eks" {
 
   compute_config = {
     enabled = var.temp_upgrade_enable_compute
-  }
-  iam_role_additional_policies = { # TODO: change from default with upgrade - research impact
-    AmazonEKSVPCResourceController = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonEKSVPCResourceController"
   }
   kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_ro_arns) : []
   eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
@@ -263,7 +260,7 @@ module "ebs_csi_driver_irsa_role" {
 
 module "s3_csi" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "4.11.0"
+  version = "5.7.0"
   bucket  = "${var.stack_tags.Owner}-${var.stack_name}-csi-bucket"
 
   create_bucket                         = var.s3_csi_driver_create_bucket
