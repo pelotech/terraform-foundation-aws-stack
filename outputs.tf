@@ -20,5 +20,5 @@ output "eks_cluster_tls_certificate_sha1_fingerprint" {
 ################################################################################
 output "vpc" {
   description = "The vpc object when it's created"
-  value = module.vpc
+  value       = module.vpc
 }

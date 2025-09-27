@@ -22,18 +22,18 @@ variable "stack_tags" {
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
 variable "stack_use_vpc_cni_max_pods" {
-  type = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Set to true if using the vpc cni - otherwise defaults to 110 max pods"
 }
 variable "stack_enable_cluster_kms" {
-  type = bool
-  default = true
+  type        = bool
+  default     = true
   description = "Should secrets be encrypted by kms in the cluster"
 }
 variable "stack_enable_default_eks_managed_node_group" {
-  type = bool
-  default = true
+  type        = bool
+  default     = true
   description = "Ability to disable default node group"
 }
 variable "stack_fck_nat_enabled" {
@@ -75,15 +75,15 @@ variable "stack_vpc_block" {
 
 variable "extra_access_entries" {
   type = list(object({
-    principal_arn           = string
-    kubernetes_groups       = optional(list(string))
-    policy_associations     = optional(map(object({
-      policy_arn              = string
+    principal_arn     = string
+    kubernetes_groups = optional(list(string))
+    policy_associations = optional(map(object({
+      policy_arn = string
       access_scope = object({
-        type = string
+        type       = string
         namespaces = optional(list(string))
       })
-    })),{})
+    })), {})
 
   }))
   description = "EKS access entries needed by IAM roles interacting with this cluster"
@@ -93,7 +93,7 @@ variable "extra_access_entries" {
     error_message = "The access scope type can only be 'namespace' or 'cluster'"
     condition = alltrue([
       for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
-          for policy in values(entry.policy_associations) : contains(["namespace", "cluster"], policy.access_scope.type)
+        for policy in values(entry.policy_associations) : contains(["namespace", "cluster"], policy.access_scope.type)
       ]))
     ])
   }
@@ -102,7 +102,7 @@ variable "extra_access_entries" {
     error_message = "The access scope type 'namespace' requires 'namespaces', namespaces can't be set otherwise."
     condition = alltrue([
       for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
-        for policy in values(entry.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) ||  policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
+        for policy in values(entry.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) || policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
       ]))
     ])
   }
@@ -121,19 +121,19 @@ variable "stack_ro_arns" {
 }
 
 variable "initial_node_taints" {
-  type = list(object({ key = string, value = string, effect = string }))
-  default = [
-    {
+  type = map(object({ key = string, value = string, effect = string }))
+  default = {
+    criticalAddonsOnly = {
       key    = "CriticalAddonsOnly"
       value  = "true"
       effect = "NO_SCHEDULE"
-    },
-    {
+    }
+    nidhogg = {
       key    = "nidhogg.uswitch.com/kube-system.kube-multus-ds"
       value  = "true"
       effect = "NO_SCHEDULE"
     }
-  ]
+  }
   description = "taints for the initial managed node group"
 }
 variable "initial_node_labels" {
