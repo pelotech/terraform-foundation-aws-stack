@@ -219,6 +219,7 @@ module "karpenter" {
   })
 }
 
+# IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
   version = "5.60.0"
