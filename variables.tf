@@ -121,19 +121,19 @@ variable "stack_ro_arns" {
 }
 
 variable "initial_node_taints" {
-  type = list(object({ key = string, value = string, effect = string }))
-  default = [
-    {
-      key    = "CriticalAddonsOnly"
-      value  = "true"
-      effect = "NO_SCHEDULE"
-    },
-    {
-      key    = "nidhogg.uswitch.com/kube-system.kube-multus-ds"
-      value  = "true"
-      effect = "NO_SCHEDULE"
+  type = map(object({ key = string, value = string, effect = string }))
+  default = {
+  criticalAddonsOnly = {
+    key = "CriticalAddonsOnly"
+    value = "true"
+    effect = "NO_SCHEDULE"
+  }
+    nidhogg ={
+    key = "nidhogg.uswitch.com/kube-system.kube-multus-ds"
+    value = "true"
+    effect = "NO_SCHEDULE"
     }
-  ]
+  }
   description = "taints for the initial managed node group"
 }
 variable "initial_node_labels" {

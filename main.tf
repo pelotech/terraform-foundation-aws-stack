@@ -3,7 +3,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 5.45.0"
+      version = ">= 6.14.1"
     }
   }
 }
@@ -120,25 +120,28 @@ resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
 
 module "eks" {
   source          = "terraform-aws-modules/eks/aws"
-  version         = "20.37.2"
-  cluster_name    = var.stack_name
-  cluster_version = var.eks_cluster_version
+  version         = "21.3.1"
+  name    = var.stack_name
+  kubernetes_version = var.eks_cluster_version
   create          = var.stack_create
   # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
   create_node_security_group      = false
-  cluster_endpoint_private_access = true
-  cluster_endpoint_public_access  = true
-  cluster_enabled_log_types       = []
+  endpoint_private_access = true
+  endpoint_public_access  = true
+  enabled_log_types       = []
 
   vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
   subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
   create_kms_key = var.stack_enable_cluster_kms
   enable_irsa    = true
-  cluster_encryption_config = var.stack_enable_cluster_kms ? {
+  encryption_config = var.stack_enable_cluster_kms ? {
     "resources": [
       "secrets"
     ]
   } : {}
+  iam_role_additional_policies = { # TODO: change from default with upgrade - research impact
+    AmazonEKSVPCResourceController = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonEKSVPCResourceController"
+  }
   kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_ro_arns) : []
   eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
     "initial-${var.stack_name}" = {
@@ -149,6 +152,13 @@ module "eks" {
       desired_size             = var.initial_node_desired_size
       ami_type                 = "AL2023_x86_64_STANDARD"
       capacity_type            = "ON_DEMAND"
+      enable_monitoring = true # TODO: change from default with upgrade - research impact
+      use_latest_ami_release_version = false # TODO: change from default with upgrade - research impact
+      metadata_options = { # TODO: change from default with upgrade - research impact
+        http_endpoint               = "enabled"
+        http_put_response_hop_limit = 2
+        http_tokens = "required"
+      }
       labels                   = var.initial_node_labels
       cloudinit_pre_nodeadm  = var.stack_use_vpc_cni_max_pods ? [] : local.cloudinit_pre_nodeadm
       block_device_mappings = {
@@ -173,28 +183,58 @@ module "eks" {
     "karpenter.sh/discovery" = var.stack_name
   })
 }
-
+data "aws_iam_policy_document" "source" { # allow usage with irsa
+  statement {
+    actions   = ["sts:AssumeRoleWithWebIdentity"]
+    condition {
+      test     = "StringEquals"
+      values = ["sts.amazonaws.com"]
+      variable = "${module.eks.oidc_provider}:aud"
+    }
+    condition {
+      test     = "StringEquals"
+      values = ["system:serviceaccount:karpenter:karpenter"]
+      variable = "${module.eks.oidc_provider}:sub"
+    }
+    principals {
+      identifiers = [module.eks.oidc_provider_arn]
+      type = "Federated"
+    }
+    resources = ["*"]
+  }
+}
 module "karpenter" {
   count                           = var.stack_create ? 1 : 0
   source                          = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version                         = "20.37.2"
+  version                         = "21.3.1"
   cluster_name                    = module.eks.cluster_name
-  enable_irsa                     = true
-  enable_pod_identity             = false # TODO: PR because it doesn't work in govcloud (-> it works now since 8/24)
-  enable_v1_permissions           = true
   queue_name                      = var.stack_name
-  irsa_oidc_provider_arn          = module.eks.oidc_provider_arn
-  irsa_namespace_service_accounts = ["karpenter:karpenter"]
-  # TODO: get a better naming conventions for roles
   node_iam_role_name            = "KarpenterNodeRole-${var.stack_name}"
   iam_role_name                 = "${var.stack_name}-karpenter-role"
   iam_role_use_name_prefix      = false
   node_iam_role_use_name_prefix = false
+  create_pod_identity_association = false
+  iam_role_source_assume_policy_documents = [data.aws_iam_policy_document.source.json]
   tags = merge(var.stack_tags, {
   })
 }
 
-# IAM roles and policies for the cluster
+# # IAM roles and policies for the cluster
+# module "karpenter_irsa_role" {
+#   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+#   version = "5.60.0"
+#   # create_role = var.stack_create
+#   # role_name                              = "${var.stack_name}-karpenter-role"
+#   role_name = module.karpenter.iam_role_name
+#   oidc_providers = {
+#     cluster = {
+#       provider_arn               = module.eks.oidc_provider_arn
+#       namespace_service_accounts = ["karpenter:karpenter"]
+#     }
+#   }
+#   tags = merge(var.stack_tags, {
+#   })
+# }
 module "load_balancer_controller_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
   version = "5.60.0"
