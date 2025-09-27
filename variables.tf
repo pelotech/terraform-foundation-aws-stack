@@ -183,3 +183,9 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+
+variable "temp_upgrade_auto_mode" {
+  type = string
+  description = "upgrading to this version mean you need to temporarily enable auto mode and then disable"
+  default = false
+}

@@ -129,7 +129,10 @@ module "eks" {
   endpoint_private_access    = true
   endpoint_public_access     = true
   enabled_log_types          = []
-
+  addons = {}
+  compute_config = {
+    enabled = var.temp_upgrade_auto_mode # will remove in next major version
+  }
   vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
   subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
   create_kms_key = var.stack_enable_cluster_kms
@@ -200,7 +203,6 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
       identifiers = [module.eks.oidc_provider_arn]
       type        = "Federated"
     }
-    resources = ["*"]
   }
 }
 module "karpenter" {
