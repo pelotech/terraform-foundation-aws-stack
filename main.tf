@@ -139,6 +139,10 @@ module "eks" {
       "secrets"
     ]
   } : {}
+
+  compute_config = {
+    enabled = var.temp_upgrade_enable_compute
+  }
   iam_role_additional_policies = { # TODO: change from default with upgrade - research impact
     AmazonEKSVPCResourceController = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonEKSVPCResourceController"
   }
@@ -200,7 +204,6 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
       identifiers = [module.eks.oidc_provider_arn]
       type        = "Federated"
     }
-    resources = ["*"]
   }
 }
 module "karpenter" {
