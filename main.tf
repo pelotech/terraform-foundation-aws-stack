@@ -219,22 +219,6 @@ module "karpenter" {
   })
 }
 
-# # IAM roles and policies for the cluster
-# module "karpenter_irsa_role" {
-#   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-#   version = "5.60.0"
-#   # create_role = var.stack_create
-#   # role_name                              = "${var.stack_name}-karpenter-role"
-#   role_name = module.karpenter.iam_role_name
-#   oidc_providers = {
-#     cluster = {
-#       provider_arn               = module.eks.oidc_provider_arn
-#       namespace_service_accounts = ["karpenter:karpenter"]
-#     }
-#   }
-#   tags = merge(var.stack_tags, {
-#   })
-# }
 module "load_balancer_controller_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
   version = "5.60.0"
