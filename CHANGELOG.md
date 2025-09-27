@@ -1,5 +1,21 @@
 # Changelog
 
+## [5.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.2...v5.0.0) (2025-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* upgrade eks module - has breaking change the to the interface ([#61](https://github.com/pelotech/terraform-foundation-aws-stack/issues/61))
+
+### Features
+
+* upgrade eks module - has breaking change the to the interface ([#61](https://github.com/pelotech/terraform-foundation-aws-stack/issues/61)) ([9aa7970](https://github.com/pelotech/terraform-foundation-aws-stack/commit/9aa7970ccda5cbd47d4d385eb6cc9a4c4f3fb15c))
+
+
+### Chores
+
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.43.0 ([#58](https://github.com/pelotech/terraform-foundation-aws-stack/issues/58)) ([d7ad2d3](https://github.com/pelotech/terraform-foundation-aws-stack/commit/d7ad2d31968caeda9d67b7c238aa34c0aec05d1c))
+
 ## [4.0.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v4.0.1...v4.0.2) (2025-09-06)
 
 
