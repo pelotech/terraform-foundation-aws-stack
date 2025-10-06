@@ -120,7 +120,7 @@ resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
 
 module "eks" {
   source             = "terraform-aws-modules/eks/aws"
-  version            = "21.3.1"
+  version            = "21.3.2"
   name               = var.stack_name
   kubernetes_version = var.eks_cluster_version
   create             = var.stack_create
@@ -206,7 +206,7 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
 module "karpenter" {
   count                                   = var.stack_create ? 1 : 0
   source                                  = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version                                 = "21.3.1"
+  version                                 = "21.3.2"
   cluster_name                            = module.eks.cluster_name
   queue_name                              = var.stack_name
   node_iam_role_name                      = "KarpenterNodeRole-${var.stack_name}"
