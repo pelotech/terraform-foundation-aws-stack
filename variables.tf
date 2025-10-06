@@ -184,8 +184,3 @@ variable "vpc_endpoints" {
   default     = []
 }
 
-variable "temp_upgrade_enable_compute" {
-  type = bool
-  description = "temp value for upgrade - must enable and then disable - will get removed once all clusters have been upgraded"
-  default = false
-}
