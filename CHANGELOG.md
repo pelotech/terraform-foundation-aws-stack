@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.0.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.1...v5.0.2) (2025-10-06)
+
+
+### Bug Fixes
+
+* upgrade to latest eks module, use forked karpenter module to reduce policy size ([85381cc](https://github.com/pelotech/terraform-foundation-aws-stack/commit/85381ccaa78f631ceb9d00531edf5525c418583f))
+
+
+### Chores
+
+* **deps:** update terraform terraform-aws-modules/vpc/aws to v6.4.0 ([#57](https://github.com/pelotech/terraform-foundation-aws-stack/issues/57)) ([bddf867](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bddf867f899b67a79be0c0e6cea218cdab2b6dca))
+* pre-commit fix ([8d91ff2](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8d91ff287f03dbba09a89f4e17b3dcf8e668c1d8))
+
 ## [5.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.0...v5.0.1) (2025-09-27)
 
 
