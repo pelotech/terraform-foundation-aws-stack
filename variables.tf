@@ -183,4 +183,3 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
-
