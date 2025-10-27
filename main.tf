@@ -201,9 +201,9 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
 }
 module "karpenter" {
   count                                   = var.stack_create ? 1 : 0
-  # source                                  = "terraform-aws-modules/eks/aws//modules/karpenter"
-  # version                                 = "21.3.2"
-  source = "git::https://github.com/pelotech/terraform-aws-eks.git//modules/karpenter?ref=21.3.2-karpenter"
+  source                                  = "terraform-aws-modules/eks/aws//modules/karpenter"
+  version                                 = "21.8.0"
+  enable_inline_policy                    = true
   cluster_name                            = module.eks.cluster_name
   queue_name                              = var.stack_name
   node_iam_role_name                      = "KarpenterNodeRole-${var.stack_name}"
