@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.0.4](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.3...v5.0.4) (2025-10-27)
+
+
+### Chores
+
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.8.0 ([#71](https://github.com/pelotech/terraform-foundation-aws-stack/issues/71)) ([96526d1](https://github.com/pelotech/terraform-foundation-aws-stack/commit/96526d18d6135c619be468986e8cfcff278b8973))
+* use inline policy to get around character limit ([f4df3de](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f4df3deba2c78895d370423101eb719f6fce2083))
+
 ## [5.0.3](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.2...v5.0.3) (2025-10-22)
 
 
