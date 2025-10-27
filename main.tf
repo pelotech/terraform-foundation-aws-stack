@@ -120,7 +120,7 @@ resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
 
 module "eks" {
   source             = "terraform-aws-modules/eks/aws"
-  version            = "21.6.1"
+  version            = "21.8.0"
   name               = var.stack_name
   kubernetes_version = var.eks_cluster_version
   create             = var.stack_create
