@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.5](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.4...v5.0.5) (2025-11-01)
+
+
+### Chores
+
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.44.0 ([#73](https://github.com/pelotech/terraform-foundation-aws-stack/issues/73)) ([67da665](https://github.com/pelotech/terraform-foundation-aws-stack/commit/67da66570d0730c4cd6cdb802b0ecdcf45efcafc))
+
 ## [5.0.4](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.3...v5.0.4) (2025-10-27)
 
 
