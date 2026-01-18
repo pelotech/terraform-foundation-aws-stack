@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.6](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.5...v5.0.6) (2026-01-18)
+
+
+### Refactors
+
+* update for latest iam modules - requires recreation of the policy due to new name format ([#81](https://github.com/pelotech/terraform-foundation-aws-stack/issues/81)) ([2d07f1c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2d07f1c7d29255b2c600574038ff59e106d0c965))
+
 ## [5.0.5](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.4...v5.0.5) (2026-01-18)
 
 
