@@ -1,5 +1,19 @@
 # Changelog
 
+## [5.0.5](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.4...v5.0.5) (2026-01-18)
+
+
+### Chores
+
+* add renovate github pinning ([413c9d5](https://github.com/pelotech/terraform-foundation-aws-stack/commit/413c9d5d50a1fd6436d298b1c4b6f570f63cf788))
+* **deps:** pin dependencies ([#80](https://github.com/pelotech/terraform-foundation-aws-stack/issues/80)) ([0b7de16](https://github.com/pelotech/terraform-foundation-aws-stack/commit/0b7de160b8c8965b725bb7317848d3bdb134d73f))
+* **deps:** update actions/checkout action to v6 ([#77](https://github.com/pelotech/terraform-foundation-aws-stack/issues/77)) ([79a8f88](https://github.com/pelotech/terraform-foundation-aws-stack/commit/79a8f88abd12b8c4b69f92f17ef0dd28c5d23335))
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.14.0 ([#75](https://github.com/pelotech/terraform-foundation-aws-stack/issues/75)) ([2815af8](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2815af8f24fce4ff04ad195545bb3a870407a9ca))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.10.0 ([#78](https://github.com/pelotech/terraform-foundation-aws-stack/issues/78)) ([fb5cde8](https://github.com/pelotech/terraform-foundation-aws-stack/commit/fb5cde8cc51b005abd30b180045464548d3223f8))
+* **deps:** update terraform terraform-aws-modules/vpc/aws to v6.6.0 ([#76](https://github.com/pelotech/terraform-foundation-aws-stack/issues/76)) ([d89342c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/d89342c4a800a4ffa9f66c9382bd2ca8e673e305))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.44.0 ([#73](https://github.com/pelotech/terraform-foundation-aws-stack/issues/73)) ([67da665](https://github.com/pelotech/terraform-foundation-aws-stack/commit/67da66570d0730c4cd6cdb802b0ecdcf45efcafc))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.45.0 ([#79](https://github.com/pelotech/terraform-foundation-aws-stack/issues/79)) ([71f471c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/71f471ce63d1f9dee17c9faf395ca285d8406085))
+
 ## [5.0.4](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.3...v5.0.4) (2025-10-27)
 
 
