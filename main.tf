@@ -218,12 +218,13 @@ module "karpenter" {
 
 # IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "5.60.0"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.3.0"
 
-  create_role = var.stack_create
+  use_name_prefix = false
+  name            = "${var.stack_name}-alb-role"
+  policy_name                            = "AmazonEKS_AWS_Load_Balancer_Controller-${var.stack_name}"
 
-  role_name                              = "${var.stack_name}-alb-role"
   attach_load_balancer_controller_policy = true
 
   oidc_providers = {
@@ -237,12 +238,13 @@ module "load_balancer_controller_irsa_role" {
 }
 
 module "ebs_csi_driver_irsa_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "5.60.0"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.3.0"
 
-  create_role = var.stack_create
+  use_name_prefix = false
+  name            = "${var.stack_name}-ebs-csi-driver-role"
+  policy_name     = "AmazonEKS_EBS_CSI_Policy-${var.stack_name}"
 
-  role_name             = "${var.stack_name}-ebs-csi-driver-role"
   attach_ebs_csi_policy = true
 
   oidc_providers = {
@@ -278,12 +280,14 @@ module "s3_csi" {
 }
 
 module "s3_driver_irsa_role" {
-  count       = var.stack_create ? 1 : 0
-  source      = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version     = "5.60.0"
-  create_role = var.stack_create
+  count   = var.stack_create ? 1 : 0
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.3.0"
 
-  role_name                       = "${var.stack_name}-s3-csi-driver-role"
+  use_name_prefix = false
+  name            = "${var.stack_name}-s3-csi-driver-role"
+  policy_name     = "AmazonEKS_Mountpoint_S3_CSI-${var.stack_name}"
+
   attach_mountpoint_s3_csi_policy = true
   mountpoint_s3_csi_bucket_arns   = local.s3_csi_arns
   mountpoint_s3_csi_path_arns     = [for arn in local.s3_csi_arns : "${arn}/*"]
@@ -299,12 +303,13 @@ module "s3_driver_irsa_role" {
 
 module "external_dns_irsa_role" {
   count   = var.stack_create ? 1 : 0
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "5.60.0"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.3.0"
 
-  create_role = var.stack_create
+  use_name_prefix = false
+  name            = "${var.stack_name}-external-dns-role"
+  policy_name     = "AmazonEKS_External_DNS_Policy-${var.stack_name}"
 
-  role_name                     = "${var.stack_name}-external-dns-role"
   attach_external_dns_policy    = true
   external_dns_hosted_zone_arns = ["*"]
 
@@ -318,14 +323,16 @@ module "external_dns_irsa_role" {
   })
 }
 
+
 module "cert_manager_irsa_role" {
   count   = var.stack_create ? 1 : 0
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "5.60.0"
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.3.0"
 
-  create_role = var.stack_create
+  use_name_prefix = false
+  name            = "${var.stack_name}-cert-manager-role"
+  policy_name     = "AmazonEKS_Cert_Manager_Policy-${var.stack_name}"
 
-  role_name                     = "${var.stack_name}-cert-manager-role"
   attach_cert_manager_policy    = true
   cert_manager_hosted_zone_arns = ["*"]
 
