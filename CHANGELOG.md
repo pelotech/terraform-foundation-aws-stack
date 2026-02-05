@@ -1,5 +1,19 @@
 # Changelog
 
+## [5.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.6...v5.1.0) (2026-02-05)
+
+
+### Features
+
+* upgrade to eks 1.35 ([#86](https://github.com/pelotech/terraform-foundation-aws-stack/issues/86)) ([82b69a7](https://github.com/pelotech/terraform-foundation-aws-stack/commit/82b69a7d45e1687f825b86bcd4114b1b6790b938))
+
+
+### Chores
+
+* **deps:** update actions/checkout digest to de0fac2 ([#85](https://github.com/pelotech/terraform-foundation-aws-stack/issues/85)) ([57dd537](https://github.com/pelotech/terraform-foundation-aws-stack/commit/57dd537dc1ed0155dc664a7d2b7ee61c6bb56a43))
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.15.1 ([#83](https://github.com/pelotech/terraform-foundation-aws-stack/issues/83)) ([f2d113f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f2d113f70e1c311f919e0148de8eea9bdffa4a1d))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v6.4.0 ([#84](https://github.com/pelotech/terraform-foundation-aws-stack/issues/84)) ([2de189e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2de189ea15ec9d14021055cbfe693ef71ed475eb))
+
 ## [5.0.6](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.5...v5.0.6) (2026-01-18)
 
 
