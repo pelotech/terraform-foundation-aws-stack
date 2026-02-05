@@ -10,7 +10,7 @@ variable "stack_create" {
 }
 variable "eks_cluster_version" {
   type        = string
-  default     = "1.33"
+  default     = "1.35"
   description = "Kubernetes version to set for the cluster"
 }
 variable "stack_tags" {
