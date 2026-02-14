@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.2.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.1.0...v5.2.0) (2026-02-14)
+
+
+### Features
+
+* add eip to fck-nat and make ami choice configurable ([#88](https://github.com/pelotech/terraform-foundation-aws-stack/issues/88)) ([38e742e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/38e742e0fca49545a32107503adf6f552c5a6a9c))
+
 ## [5.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.0.6...v5.1.0) (2026-02-05)
 
 
