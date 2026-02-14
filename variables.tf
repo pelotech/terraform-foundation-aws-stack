@@ -42,13 +42,13 @@ variable "stack_fck_nat_enabled" {
   description = "Use fck nat to save not managed nat cost"
 }
 variable "stack_fck_nat_ami_owner_id" {
-  type = string
-  default = "568608671756"
+  type        = string
+  default     = "568608671756"
   description = "Owner ID to search of ami"
 }
 variable "stack_fck_nat_ami_name_filter" {
-  type = string
-  default = "fck-nat-al2023-hvm-*"
+  type        = string
+  default     = "fck-nat-al2023-hvm-*"
   description = "ami name filter to find the correct ami"
 }
 variable "stack_fck_nat_instance_type" {

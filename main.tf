@@ -10,7 +10,7 @@ terraform {
 data "aws_partition" "current" {}
 
 locals {
-  is_arm             = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_fck_nat_instance_type))
+  is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_fck_nat_instance_type))
   admin_access_entries = {
     for index, item in var.stack_admin_arns : "admin_${index}" => {
       principal_arn = item
@@ -88,7 +88,7 @@ module "vpc" {
 }
 
 data "aws_ami" "main" {
-  count = var.stack_fck_nat_enabled ? 1 : 0
+  count       = var.stack_fck_nat_enabled ? 1 : 0
   most_recent = true
   owners      = [var.stack_fck_nat_ami_owner_id]
   filter {
@@ -111,22 +111,22 @@ data "aws_ami" "main" {
   }
 }
 
-resource aws_eip "main" {
+resource "aws_eip" "main" {
   count = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
-tags = {
-  Name = "nat-${var.stack_name}-${count.index}"
-}
+  tags = {
+    Name = "nat-${var.stack_name}-${count.index}"
+  }
 }
 
 module "fck_nat" {
-  source  = "RaJiska/fck-nat/aws"
-  version = "1.4.0"
-  count   = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
+  source             = "RaJiska/fck-nat/aws"
+  version            = "1.4.0"
+  count              = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
-  name      = "${var.stack_name}-${module.vpc.azs[count.index]}"
-  ami_id = data.aws_ami.main[0].id
-  vpc_id    = module.vpc.vpc_id
-  subnet_id = module.vpc.public_subnets[count.index]
+  name               = "${var.stack_name}-${module.vpc.azs[count.index]}"
+  ami_id             = data.aws_ami.main[0].id
+  vpc_id             = module.vpc.vpc_id
+  subnet_id          = module.vpc.public_subnets[count.index]
   # TODO: look to enable agent/spot
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
@@ -256,7 +256,7 @@ module "load_balancer_controller_irsa_role" {
 
   use_name_prefix = false
   name            = "${var.stack_name}-alb-role"
-  policy_name                            = "AmazonEKS_AWS_Load_Balancer_Controller-${var.stack_name}"
+  policy_name     = "AmazonEKS_AWS_Load_Balancer_Controller-${var.stack_name}"
 
   attach_load_balancer_controller_policy = true
 
