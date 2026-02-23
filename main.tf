@@ -10,7 +10,7 @@ terraform {
 data "aws_partition" "current" {}
 
 locals {
-  is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_fck_nat_instance_type))
+  is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_pelotech_nat_instance_type))
   admin_access_entries = {
     for index, item in var.stack_admin_arns : "admin_${index}" => {
       principal_arn = item
@@ -88,12 +88,12 @@ module "vpc" {
 }
 
 data "aws_ami" "main" {
-  count       = var.stack_fck_nat_enabled ? 1 : 0
+  count       = (var.stack_fck_nat_enabled || var.stack_pelotech_nat_enabled) ? 1 : 0
   most_recent = true
-  owners      = [var.stack_fck_nat_ami_owner_id]
+  owners      = [var.stack_pelotech_nat_ami_owner_id]
   filter {
     name   = "name"
-    values = [var.stack_fck_nat_ami_name_filter]
+    values = [var.stack_pelotech_nat_ami_name_filter]
   }
 
   filter {
@@ -130,7 +130,7 @@ module "fck_nat" {
   # TODO: look to enable agent/spot
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
-  instance_type       = var.stack_fck_nat_instance_type
+  instance_type       = var.stack_pelotech_nat_instance_type
   update_route_tables = true
   route_tables_ids = {
     private = module.vpc.private_route_table_ids[count.index]

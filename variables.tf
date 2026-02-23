@@ -39,21 +39,26 @@ variable "stack_enable_default_eks_managed_node_group" {
 variable "stack_fck_nat_enabled" {
   type        = bool
   default     = false
-  description = "Use fck nat to save not managed nat cost"
+  description = "DEPRECATED: This will be removed soon. Use 'stack_pelotech_nat_enabled' instead."
 }
-variable "stack_fck_nat_ami_owner_id" {
+variable "stack_pelotech_nat_enabled" {
+  type        = bool
+  default     = false
+  description = "Use pelotech-nat as NAT instances instead of NAT gateway"
+}
+variable "stack_pelotech_nat_ami_owner_id" {
   type        = string
   default     = "568608671756"
   description = "Owner ID to search of ami"
 }
-variable "stack_fck_nat_ami_name_filter" {
+variable "stack_pelotech_nat_ami_name_filter" {
   type        = string
   default     = "fck-nat-al2023-hvm-*"
   description = "ami name filter to find the correct ami"
 }
-variable "stack_fck_nat_instance_type" {
+variable "stack_pelotech_nat_instance_type" {
   type        = string
-  default     = "t3.micro"
+  default     = "t4g.micro"
   description = "choose instance based on bandwitch requirements"
 }
 variable "stack_existing_vpc_config" {
