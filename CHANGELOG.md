@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.2.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.1...v5.2.2) (2026-02-26)
+
+
+### Bug Fixes
+
+* new variable used in all location for enabling nat instance ([7a1836e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/7a1836e74b849ae2db2145266ff5775ccd40a1cf))
+
 ## [5.2.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.0...v5.2.1) (2026-02-26)
 
 
