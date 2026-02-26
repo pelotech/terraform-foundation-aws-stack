@@ -193,3 +193,8 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+variable "permissions_boundary" {
+  type        = string
+  default     = ""
+  description = "IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition."
+}
