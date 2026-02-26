@@ -193,6 +193,11 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+variable "cluster_enabled_log_types" {
+  type        = list(string)
+  default     = []
+  description = "List of EKS control plane log types to enable. Valid values: api, audit, authenticator, controllerManager, scheduler."
+}
 
 variable "cluster_endpoint_public_access" {
   type        = bool
