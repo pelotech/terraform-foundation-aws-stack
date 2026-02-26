@@ -189,8 +189,9 @@ module "eks" {
         http_put_response_hop_limit = 2
         http_tokens                 = "required"
       }
-      labels                = var.initial_node_labels
-      cloudinit_pre_nodeadm = var.stack_use_vpc_cni_max_pods ? [] : local.cloudinit_pre_nodeadm
+      labels                  = var.initial_node_labels
+      cloudinit_pre_nodeadm   = var.stack_use_vpc_cni_max_pods ? [] : local.cloudinit_pre_nodeadm
+      pre_bootstrap_user_data = var.pre_bootstrap_user_data
       block_device_mappings = {
         xvda = {
           device_name = "/dev/xvda"

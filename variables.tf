@@ -193,3 +193,8 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+variable "pre_bootstrap_user_data" {
+  type        = string
+  default     = null
+  description = "Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages."
+}
