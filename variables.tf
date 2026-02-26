@@ -36,11 +36,6 @@ variable "stack_enable_default_eks_managed_node_group" {
   default     = true
   description = "Ability to disable default node group"
 }
-variable "stack_fck_nat_enabled" {
-  type        = bool
-  default     = false
-  description = "DEPRECATED: This will be removed soon. Use 'stack_pelotech_nat_enabled' instead."
-}
 variable "stack_pelotech_nat_enabled" {
   type        = bool
   default     = false
