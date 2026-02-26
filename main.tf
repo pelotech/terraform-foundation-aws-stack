@@ -65,8 +65,8 @@ module "vpc" {
   create_vpc                             = var.stack_existing_vpc_config == null
   enable_dns_hostnames                   = "true"
   enable_dns_support                     = "true"
-  enable_nat_gateway                     = var.stack_fck_nat_enabled != true
-  one_nat_gateway_per_az                 = var.stack_fck_nat_enabled != true
+  enable_nat_gateway                     = (var.stack_fck_nat_enabled || var.stack_pelotech_nat_enabled) != true
+  one_nat_gateway_per_az                 = (var.stack_fck_nat_enabled || var.stack_pelotech_nat_enabled) != true
   cidr                                   = var.stack_vpc_block.cidr
   azs                                    = var.stack_vpc_block.azs
   private_subnets                        = var.stack_vpc_block.private_subnets
@@ -112,7 +112,7 @@ data "aws_ami" "main" {
 }
 
 resource "aws_eip" "main" {
-  count = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
+  count = (var.stack_fck_nat_enabled || var.stack_pelotech_nat_enabled) ? length(module.vpc.azs) : 0
   tags = {
     Name = "nat-${var.stack_name}-${count.index}"
   }
@@ -121,7 +121,7 @@ resource "aws_eip" "main" {
 module "fck_nat" {
   source             = "RaJiska/fck-nat/aws"
   version            = "1.4.0"
-  count              = var.stack_fck_nat_enabled ? length(module.vpc.azs) : 0
+  count              = (var.stack_fck_nat_enabled || var.stack_pelotech_nat_enabled) ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
   name               = "${var.stack_name}-${module.vpc.azs[count.index]}"
   ami_id             = data.aws_ami.main[0].id
