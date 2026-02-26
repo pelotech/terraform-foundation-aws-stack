@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.2.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.0...v5.2.1) (2026-02-26)
+
+
+### Refactors
+
+* rename variables to more friendly versions and default to t4g.micro vs t3.micro for pricing/perf ([#90](https://github.com/pelotech/terraform-foundation-aws-stack/issues/90)) ([3a01deb](https://github.com/pelotech/terraform-foundation-aws-stack/commit/3a01deb423517f87222f201f0be2cd7a4caf1b1f))
+
+
+### Chores
+
+* **deps:** update hashicorp/setup-terraform action to v4 ([#92](https://github.com/pelotech/terraform-foundation-aws-stack/issues/92)) ([05f86a1](https://github.com/pelotech/terraform-foundation-aws-stack/commit/05f86a174bf7de73bea6ffd5074f69cad069d7a0))
+* fmt, typo, group renovate ([e079403](https://github.com/pelotech/terraform-foundation-aws-stack/commit/e079403b673705841744baccb83605393ecc60fa))
+
 ## [5.2.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.1.0...v5.2.0) (2026-02-14)
 
 
