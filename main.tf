@@ -201,7 +201,8 @@ module "eks" {
           }
         }
       }
-      taints = var.initial_node_taints
+      taints                       = var.initial_node_taints
+      iam_role_additional_policies = var.node_iam_additional_policies
     }
   } : {}
   access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.extra_access_entries)
