@@ -1,5 +1,29 @@
 # Changelog
 
+## [6.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.2...v6.0.0) (2026-02-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove deprecated variable
+
+### Features
+
+* add configurable EKS control plane logging ([#96](https://github.com/pelotech/terraform-foundation-aws-stack/issues/96)) ([b8cdfe6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/b8cdfe6d4f67a931da493c397ecc5dd5628a80fd))
+* add toggle for EKS cluster endpoint public access ([#103](https://github.com/pelotech/terraform-foundation-aws-stack/issues/103)) ([f81418a](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f81418aaa9bb82c7056e882576be658be4bc706c))
+* add toggle for node security group creation ([#102](https://github.com/pelotech/terraform-foundation-aws-stack/issues/102)) ([9975721](https://github.com/pelotech/terraform-foundation-aws-stack/commit/9975721bc5f81ce6eee759fcc1a5bb1ebd5f02dc))
+* expose additional module outputs ([#101](https://github.com/pelotech/terraform-foundation-aws-stack/issues/101)) ([02353e1](https://github.com/pelotech/terraform-foundation-aws-stack/commit/02353e16e1bf65de4dc738296cd89e12db4107bc))
+
+
+### Refactors
+
+* remove deprecated variable ([1ba2f7c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1ba2f7c06287800224219c1394063fcdc45c9473))
+
+
+### Chores
+
+* document partition-awareness in data source ([#100](https://github.com/pelotech/terraform-foundation-aws-stack/issues/100)) ([1576a3b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1576a3bfd66974a9d5f20812baa10f268d062a09))
+
 ## [5.2.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.1...v5.2.2) (2026-02-26)
 
 
