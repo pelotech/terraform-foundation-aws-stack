@@ -152,13 +152,12 @@ resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
 }
 
 module "eks" {
-  source             = "terraform-aws-modules/eks/aws"
-  version            = "21.15.1"
-  name               = var.stack_name
-  kubernetes_version = var.eks_cluster_version
-  create             = var.stack_create
-  # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
-  create_node_security_group = false
+  source                     = "terraform-aws-modules/eks/aws"
+  version                    = "21.15.1"
+  name                       = var.stack_name
+  kubernetes_version         = var.eks_cluster_version
+  create                     = var.stack_create
+  create_node_security_group = var.create_node_security_group
   endpoint_private_access    = true
   endpoint_public_access     = var.cluster_endpoint_public_access
   enabled_log_types          = []
