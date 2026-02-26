@@ -42,6 +42,10 @@ locals {
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
   # See https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/
+  kms_policy_arns = compact(concat(
+    var.kms_key_arns,
+    var.stack_enable_cluster_kms && var.stack_create ? [module.eks.kms_key_arn] : []
+  ))
   cloudinit_pre_nodeadm = [
     {
       content_type = "application/node.eks.aws"
@@ -213,6 +217,35 @@ module "eks" {
     "karpenter.sh/discovery" = var.stack_name
   })
 }
+resource "aws_iam_policy" "cluster_encryption" {
+  count       = length(var.kms_key_arns) > 0 ? 1 : 0
+  name        = "${var.stack_name}-encryption-policy"
+  description = "IAM policy for EKS cluster KMS encryption"
+  policy      = data.aws_iam_policy_document.cluster_encryption[0].json
+}
+
+data "aws_iam_policy_document" "cluster_encryption" {
+  count = length(var.kms_key_arns) > 0 ? 1 : 0
+  statement {
+    effect = "Allow"
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ListGrants",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey",
+      "kms:GenerateDataKeyWithoutPlaintext"
+    ]
+    resources = local.kms_policy_arns
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "cluster_encryption" {
+  count      = length(var.kms_key_arns) > 0 ? 1 : 0
+  policy_arn = aws_iam_policy.cluster_encryption[0].arn
+  role       = module.eks.cluster_iam_role_name
+}
+
 data "aws_iam_policy_document" "source" { # allow usage with irsa
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
