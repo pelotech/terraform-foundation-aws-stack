@@ -199,10 +199,3 @@ variable "cluster_endpoint_public_access" {
   default     = true
   description = "Whether the EKS cluster API server endpoint is publicly accessible. Set to false for private-only access (requires VPC connectivity)."
 }
-
-# TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
-variable "create_node_security_group" {
-  type        = bool
-  default     = false
-  description = "Whether to create a dedicated security group for EKS managed node groups. When true, the node_security_group_id output is populated."
-}
