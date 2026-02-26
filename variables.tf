@@ -193,3 +193,8 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+variable "kms_key_arns" {
+  type        = list(string)
+  default     = []
+  description = "Additional KMS key ARNs to grant encrypt/decrypt access to the EKS cluster IAM role. When non-empty, creates an IAM policy with KMS permissions and attaches it to the cluster role."
+}
