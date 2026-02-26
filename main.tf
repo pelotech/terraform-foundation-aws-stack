@@ -7,7 +7,7 @@ terraform {
     }
   }
 }
-data "aws_partition" "current" {}
+data "aws_partition" "current" {} # Used for GovCloud/China partition-aware ARN construction
 
 locals {
   is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_pelotech_nat_instance_type))
