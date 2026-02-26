@@ -2,7 +2,7 @@
 # IRSA
 ################################################################################
 output "eks_oidc_provider_arn" {
-  description = "EKS odic provider ARN to be able to add IRSA roles to the cluster out of band"
+  description = "EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band"
   value       = module.eks.oidc_provider_arn
 }
 

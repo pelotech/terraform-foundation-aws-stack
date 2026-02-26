@@ -4,4 +4,18 @@
     'helpers:pinGitHubActionDigests'
   ],
   dependencyDashboard: true,
+  packageRules: [
+    {
+      description: "Group terraform-aws-modules IAM updates together",
+      matchDatasources: ["terraform-module"],
+      matchPackagePatterns: ["terraform-aws-modules/iam"],
+      groupName: "terraform-aws-modules/iam",
+    },
+    {
+      description: "Group terraform-aws-modules EKS updates together",
+      matchDatasources: ["terraform-module"],
+      matchPackagePatterns: ["terraform-aws-modules/eks"],
+      groupName: "terraform-aws-modules/eks",
+    },
+  ],
 }
