@@ -193,3 +193,8 @@ variable "vpc_endpoints" {
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+variable "cluster_endpoint_public_access" {
+  type        = bool
+  default     = true
+  description = "Whether the EKS cluster API server endpoint is publicly accessible. Set to false for private-only access (requires VPC connectivity)."
+}

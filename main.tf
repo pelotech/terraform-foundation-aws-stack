@@ -160,7 +160,7 @@ module "eks" {
   # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
   create_node_security_group = false
   endpoint_private_access    = true
-  endpoint_public_access     = true
+  endpoint_public_access     = var.cluster_endpoint_public_access
   enabled_log_types          = []
 
   vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
