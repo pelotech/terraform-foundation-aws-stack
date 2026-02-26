@@ -3,16 +3,19 @@ variable "stack_name" {
   default     = "foundation-stack"
   description = "Name of the stack"
 }
+
 variable "stack_create" {
   type        = bool
   default     = true
   description = "should resources be created"
 }
+
 variable "stack_create_pelotech_nat_eip" {
   type        = bool
   default     = false
   description = "should create pelotech nat eip even if NAT isn't enabled - nice for getting ips created for allow lists"
 }
+
 variable "eks_cluster_version" {
   type        = string
   default     = "1.35"
@@ -23,6 +26,7 @@ variable "eks_cluster_version" {
     error_message = "eks_cluster_version must be in MAJOR.MINOR form (e.g. \"1.35\")."
   }
 }
+
 variable "stack_tags" {
   type = map(string)
   default = {
@@ -31,56 +35,67 @@ variable "stack_tags" {
   }
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
+
 variable "stack_enable_vpc_cni_addon" {
   type        = bool
   default     = false
   description = "Install AWS VPC CNI as a managed addon. Defaults to false so the cluster comes up CNI-less and consumers pick a CNI (Cilium, Kube-OVN, or vpc-cni). Set true to install vpc-cni as a managed addon. When false, nodeadm maxPods=110 cloudinit is applied automatically."
 }
+
 variable "stack_enable_kube_proxy_addon" {
   type        = bool
   default     = true
   description = "Install kube-proxy as a managed addon. Set false when using Cilium with kube-proxy replacement enabled."
 }
+
 variable "stack_enable_coredns_addon" {
   type        = bool
   default     = true
   description = "Install coredns as a managed addon. Note: coredns will not schedule until a CNI is running and nodes are Ready."
 }
+
 variable "stack_cluster_addons_overrides" {
   type        = any
   default     = {}
   description = "Per-addon overrides keyed by addon name (e.g. \"vpc-cni\", \"kube-proxy\", \"coredns\"). Merges over module defaults — use for version pinning, vpc-cni prefix delegation, custom networking, etc. Accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map."
 }
+
 variable "stack_enable_cluster_kms" {
   type        = bool
   default     = true
   description = "Should secrets be encrypted by kms in the cluster"
 }
+
 variable "stack_enable_default_eks_managed_node_group" {
   type        = bool
   default     = true
   description = "Ability to disable default node group"
 }
+
 variable "stack_pelotech_nat_enabled" {
   type        = bool
   default     = false
   description = "Use pelotech-nat as NAT instances instead of NAT gateway"
 }
+
 variable "stack_pelotech_nat_ami_owner_id" {
   type        = string
   default     = "568608671756"
   description = "Owner ID to search of ami"
 }
+
 variable "stack_pelotech_nat_ami_name_filter" {
   type        = string
   default     = "fck-nat-al2023-hvm-*"
   description = "ami name filter to find the correct ami"
 }
+
 variable "stack_pelotech_nat_instance_type" {
   type        = string
   default     = "t4g.micro"
   description = "choose instance based on bandwitch requirements"
 }
+
 variable "stack_existing_vpc_config" {
   type = object({
     vpc_id     = string
@@ -171,6 +186,7 @@ variable "initial_node_taints" {
   }
   description = "taints for the initial managed node group"
 }
+
 variable "initial_node_labels" {
   type = map(string)
   default = {
@@ -218,11 +234,13 @@ variable "s3_csi_driver_bucket_arns" {
   default     = []
   description = "existing buckets the s3 CSI driver should have access to"
 }
+
 variable "vpc_endpoints" {
   type        = list(string)
   description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
   default     = []
 }
+
 variable "cluster_enabled_log_types" {
   type        = list(string)
   default     = []
@@ -253,4 +271,10 @@ variable "permissions_boundary" {
   type        = string
   default     = ""
   description = "IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition."
+}
+
+variable "pre_bootstrap_user_data" {
+  type        = string
+  default     = null
+  description = "Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages."
 }
