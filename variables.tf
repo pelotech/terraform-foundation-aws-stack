@@ -284,3 +284,9 @@ variable "pre_bootstrap_user_data" {
   default     = null
   description = "Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages."
 }
+
+variable "kms_key_arns" {
+  type        = list(string)
+  default     = []
+  description = "Additional KMS key ARNs to grant encrypt/decrypt access to the EKS cluster IAM role. When non-empty, creates an IAM policy with KMS permissions and attaches it to the cluster role."
+}
