@@ -211,3 +211,9 @@ variable "create_node_security_group" {
   default     = false
   description = "Whether to create a dedicated security group for EKS managed node groups. When true, the node_security_group_id output is populated."
 }
+
+variable "permissions_boundary" {
+  type        = string
+  default     = ""
+  description = "IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition."
+}
