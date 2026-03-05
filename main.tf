@@ -114,7 +114,7 @@ data "aws_ami" "main" {
 }
 
 resource "aws_eip" "main" {
-  count = var.stack_pelotech_nat_enabled ? length(module.vpc.azs) : 0
+  count = (var.stack_pelotech_nat_enabled || var.stack_create_pelotech_nat_eip) ? length(module.vpc.azs) : 0
   tags = {
     Name = "nat-${var.stack_name}-${count.index}"
   }

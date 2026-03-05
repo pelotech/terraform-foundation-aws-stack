@@ -8,6 +8,11 @@ variable "stack_create" {
   default     = true
   description = "should resources be created"
 }
+variable "stack_create_pelotech_nat_eip" {
+  type        = bool
+  default     = false
+  description = "should create pelotech nat eip even if NAT isn't enabled - nice for getting ips created for allow lists"
+}
 variable "eks_cluster_version" {
   type        = string
   default     = "1.35"
