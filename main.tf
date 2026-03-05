@@ -8,9 +8,11 @@ terraform {
   }
 }
 data "aws_partition" "current" {}
+data "aws_caller_identity" "current" {}
 
 locals {
-  is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_pelotech_nat_instance_type))
+  permissions_boundary_arn = var.permissions_boundary != "" ? "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}" : null
+  is_arm                   = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_pelotech_nat_instance_type))
   admin_access_entries = {
     for index, item in var.stack_admin_arns : "admin_${index}" => {
       principal_arn = item
@@ -152,16 +154,16 @@ resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
 }
 
 module "eks" {
-  source             = "terraform-aws-modules/eks/aws"
-  version            = "21.15.1"
-  name               = var.stack_name
-  kubernetes_version = var.eks_cluster_version
-  create             = var.stack_create
-  # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
-  create_node_security_group = false
-  endpoint_private_access    = true
-  endpoint_public_access     = true
-  enabled_log_types          = []
+  source                        = "terraform-aws-modules/eks/aws"
+  version                       = "21.15.1"
+  name                          = var.stack_name
+  kubernetes_version            = var.eks_cluster_version
+  create                        = var.stack_create
+  create_node_security_group    = var.create_node_security_group
+  iam_role_permissions_boundary = local.permissions_boundary_arn
+  endpoint_private_access       = true
+  endpoint_public_access        = var.cluster_endpoint_public_access
+  enabled_log_types             = var.cluster_enabled_log_types
 
   vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
   subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
@@ -176,6 +178,7 @@ module "eks" {
   eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
     "initial-${var.stack_name}" = {
       iam_role_use_name_prefix       = false
+      iam_role_permissions_boundary  = local.permissions_boundary_arn
       instance_types                 = var.initial_instance_types
       min_size                       = var.initial_node_min_size
       max_size                       = var.initial_node_max_size
@@ -245,6 +248,8 @@ module "karpenter" {
   iam_role_use_name_prefix                = false
   node_iam_role_use_name_prefix           = false
   create_pod_identity_association         = false
+  iam_role_permissions_boundary_arn       = local.permissions_boundary_arn
+  node_iam_role_permissions_boundary      = local.permissions_boundary_arn
   iam_role_source_assume_policy_documents = [data.aws_iam_policy_document.source.json]
   tags = merge(var.stack_tags, {
   })
@@ -267,6 +272,7 @@ module "load_balancer_controller_irsa_role" {
       namespace_service_accounts = ["alb:aws-load-balancer-controller"]
     }
   }
+  permissions_boundary = local.permissions_boundary_arn
   tags = merge(var.stack_tags, {
   })
 }
@@ -287,6 +293,7 @@ module "ebs_csi_driver_irsa_role" {
       namespace_service_accounts = ["kube-system:ebs-csi-driver"]
     }
   }
+  permissions_boundary = local.permissions_boundary_arn
   tags = merge(var.stack_tags, {
   })
 }
@@ -331,6 +338,7 @@ module "s3_driver_irsa_role" {
       namespace_service_accounts = ["kube-system:s3-csi-driver"]
     }
   }
+  permissions_boundary = local.permissions_boundary_arn
   tags = merge(var.stack_tags, {
   })
 }
@@ -353,6 +361,7 @@ module "external_dns_irsa_role" {
       namespace_service_accounts = ["external-dns:external-dns-controller"]
     }
   }
+  permissions_boundary = local.permissions_boundary_arn
   tags = merge(var.stack_tags, {
   })
 }
@@ -376,6 +385,7 @@ module "cert_manager_irsa_role" {
       namespace_service_accounts = ["cert-manager:cert-manager"]
     }
   }
+  permissions_boundary = local.permissions_boundary_arn
   tags = merge(var.stack_tags, {
   })
 }
