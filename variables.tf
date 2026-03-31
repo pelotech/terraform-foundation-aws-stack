@@ -222,3 +222,8 @@ variable "permissions_boundary" {
   default     = ""
   description = "IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition."
 }
+variable "pre_bootstrap_user_data" {
+  type        = string
+  default     = null
+  description = "Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages."
+}
