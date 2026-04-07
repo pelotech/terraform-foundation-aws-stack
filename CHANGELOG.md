@@ -1,5 +1,15 @@
 # Changelog
 
+## [6.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v6.0.0...v6.0.1) (2026-04-07)
+
+
+### Chores
+
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.17.1 ([#106](https://github.com/pelotech/terraform-foundation-aws-stack/issues/106)) ([5ec7240](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5ec72404b1d5f7550344e0ce4e3927a818743022))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.12.0 ([#105](https://github.com/pelotech/terraform-foundation-aws-stack/issues/105)) ([6dcc5e6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6dcc5e6e376f474714b96039a208de930f092fce))
+* **deps:** update terraform terraform-aws-modules/vpc/aws to v6.6.1 ([#107](https://github.com/pelotech/terraform-foundation-aws-stack/issues/107)) ([f2f695f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f2f695f85060326be91c0758d1c50d0380fc8706))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.47.0 ([#104](https://github.com/pelotech/terraform-foundation-aws-stack/issues/104)) ([2980f30](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2980f30860c069e2e1cbc4cc3b0e73d051228f24))
+
 ## [6.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.2...v6.0.0) (2026-03-05)
 
 
