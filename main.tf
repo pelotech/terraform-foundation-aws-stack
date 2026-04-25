@@ -1,14 +1,12 @@
-terraform {
-  required_version = ">= 1.5.7"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 6.14.1"
-    }
-  }
-}
 data "aws_partition" "current" {}
 data "aws_caller_identity" "current" {}
+
+check "initial_node_group_sizing" {
+  assert {
+    condition     = var.initial_node_min_size <= var.initial_node_desired_size && var.initial_node_desired_size <= var.initial_node_max_size
+    error_message = "initial_node sizes must satisfy: min (${var.initial_node_min_size}) <= desired (${var.initial_node_desired_size}) <= max (${var.initial_node_max_size})."
+  }
+}
 
 locals {
   permissions_boundary_arn = var.permissions_boundary != "" ? "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}" : null

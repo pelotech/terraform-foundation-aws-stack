@@ -17,9 +17,14 @@ variable "eks_cluster_version" {
   type        = string
   default     = "1.35"
   description = "Kubernetes version to set for the cluster"
+
+  validation {
+    condition     = can(regex("^\\d+\\.\\d+$", var.eks_cluster_version))
+    error_message = "eks_cluster_version must be in MAJOR.MINOR form (e.g. \"1.35\")."
+  }
 }
 variable "stack_tags" {
-  type = map(any)
+  type = map(string)
   default = {
     Owner       = "pelotech"
     Environment = "prod"
@@ -168,6 +173,11 @@ variable "initial_node_min_size" {
   type        = number
   default     = 2
   description = "minimum size of the initial managed node group"
+
+  validation {
+    condition     = var.initial_node_min_size >= 0
+    error_message = "initial_node_min_size must be >= 0."
+  }
 }
 
 variable "initial_node_max_size" {
@@ -202,6 +212,13 @@ variable "cluster_enabled_log_types" {
   type        = list(string)
   default     = []
   description = "List of EKS control plane log types to enable. Valid values: api, audit, authenticator, controllerManager, scheduler."
+
+  validation {
+    condition = alltrue([
+      for t in var.cluster_enabled_log_types : contains(["api", "audit", "authenticator", "controllerManager", "scheduler"], t)
+    ])
+    error_message = "cluster_enabled_log_types entries must be one of: api, audit, authenticator, controllerManager, scheduler."
+  }
 }
 
 variable "cluster_endpoint_public_access" {
