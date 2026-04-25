@@ -1,5 +1,24 @@
 # Changelog
 
+## [6.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v6.0.0...v6.0.1) (2026-04-25)
+
+
+### Chores
+
+* add trivy scan to the project ([af120a5](https://github.com/pelotech/terraform-foundation-aws-stack/commit/af120a55857b714a2ee0692a4a89c24ec0ac83eb))
+* **deps:** update googleapis/release-please-action action to v5 ([#111](https://github.com/pelotech/terraform-foundation-aws-stack/issues/111)) ([addeed0](https://github.com/pelotech/terraform-foundation-aws-stack/commit/addeed073e3687b0a9d2e7249847fa046df76f6f))
+* **deps:** update googleapis/release-please-action digest to 5c625bf ([#109](https://github.com/pelotech/terraform-foundation-aws-stack/issues/109)) ([12fe386](https://github.com/pelotech/terraform-foundation-aws-stack/commit/12fe38638e28557f1202f0e1ace593457051719c))
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.17.1 ([#106](https://github.com/pelotech/terraform-foundation-aws-stack/issues/106)) ([5ec7240](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5ec72404b1d5f7550344e0ce4e3927a818743022))
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.18.0 ([#110](https://github.com/pelotech/terraform-foundation-aws-stack/issues/110)) ([dcce710](https://github.com/pelotech/terraform-foundation-aws-stack/commit/dcce7103ad8295fbc18b40188baba0ce72336a41))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v6.5.0 ([#112](https://github.com/pelotech/terraform-foundation-aws-stack/issues/112)) ([024a5c1](https://github.com/pelotech/terraform-foundation-aws-stack/commit/024a5c1aadd5254f4b4cc07d237f5938ef29d0ca))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.12.0 ([#105](https://github.com/pelotech/terraform-foundation-aws-stack/issues/105)) ([6dcc5e6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6dcc5e6e376f474714b96039a208de930f092fce))
+* **deps:** update terraform terraform-aws-modules/vpc/aws to v6.6.1 ([#107](https://github.com/pelotech/terraform-foundation-aws-stack/issues/107)) ([f2f695f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f2f695f85060326be91c0758d1c50d0380fc8706))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.47.0 ([#104](https://github.com/pelotech/terraform-foundation-aws-stack/issues/104)) ([2980f30](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2980f30860c069e2e1cbc4cc3b0e73d051228f24))
+* harden module tooling and input validation ([b311b97](https://github.com/pelotech/terraform-foundation-aws-stack/commit/b311b97d6357899b6937b548db70b6d398b6b7b2))
+* update concurrency and dep updates ([6eb17a9](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6eb17a99a63b23589886d95be590e469140f829c))
+* use latest terraform-docs version ([ba3c345](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ba3c3459e323a61fe0f4cf19c40ec0863977d904))
+* use temp dir to install tools ([6914cd9](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6914cd937bf438312a7a7e0317b10f1fa8e843d8))
+
 ## [6.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v5.2.2...v6.0.0) (2026-03-05)
 
 
