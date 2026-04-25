@@ -21,20 +21,22 @@ jobs:
 
       - name: install hcledit
         run: |
-          curl -sSLo ./hcledit.tar.gz https://github.com/minamijoyo/hcledit/releases/download/v0.2.10/hcledit_0.2.10_linux_amd64.tar.gz
-          tar -xzf hcledit.tar.gz
-          chmod +x hcledit
-          mv hcledit /usr/local/bin/hcledit
+          tmpdir=$(mktemp -d)
+          curl -sSLo "$tmpdir/hcledit.tar.gz" https://github.com/minamijoyo/hcledit/releases/download/v0.2.10/hcledit_0.2.10_linux_amd64.tar.gz
+          tar -xzf "$tmpdir/hcledit.tar.gz" -C "$tmpdir"
+          chmod +x "$tmpdir/hcledit"
+          sudo mv "$tmpdir/hcledit" /usr/local/bin/hcledit
 
       - name: install tf-lint
         run: curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
 
       - name: install tf-docs
         run: |
-          curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v0.22.0/terraform-docs-v0.22.0-linux-amd64.tar.gz
-          tar -xzf terraform-docs.tar.gz
-          chmod +x terraform-docs
-          mv terraform-docs /usr/local/bin/terraform-docs
+          tmpdir=$(mktemp -d)
+          curl -sSLo "$tmpdir/terraform-docs.tar.gz" https://terraform-docs.io/dl/v0.22.0/terraform-docs-v0.22.0-linux-amd64.tar.gz
+          tar -xzf "$tmpdir/terraform-docs.tar.gz" -C "$tmpdir"
+          chmod +x "$tmpdir/terraform-docs"
+          sudo mv "$tmpdir/terraform-docs" /usr/local/bin/terraform-docs
 
       - name: install trivy
         uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
