@@ -36,5 +36,10 @@ jobs:
           chmod +x terraform-docs
           mv terraform-docs /usr/local/bin/terraform-docs
 
+      - name: install trivy
+        uses: aquasecurity/setup-trivy@9ea583eb67910444b1f64abf338bd2e105a0a93d # v0.2.3
+        with:
+          version: v0.58.0
+
       - name: pre-commit
         run: pre-commit run --all-files --show-diff-on-failure

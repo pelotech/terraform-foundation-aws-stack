@@ -28,6 +28,11 @@ repos:
     - id: terraform_docs
       args:
         - '--args=--config=.terraform-docs.yml'
+    - id: terraform_trivy
+      args:
+        - '--args=--severity=HIGH,CRITICAL'
+        - '--args=--ignorefile=.trivyignore'
+        - '--args=--skip-dirs=**/.terraform'
     - id: terraform_tflint
       args:
         - '--args=--only=terraform_deprecated_interpolation'

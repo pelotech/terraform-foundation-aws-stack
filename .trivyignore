@@ -1,0 +1,9 @@
+# Trivy IaC findings to suppress.
+# Format: one Trivy check ID per line.
+# Add a comment above each entry explaining why it is suppressed.
+
+# Public EKS endpoint is intentionally enabled by default and gated behind
+# the `cluster_endpoint_public_access` variable (default true). Consumers
+# requiring private-only access set the var to false.
+AVD-AWS-0040
+AVD-AWS-0041
