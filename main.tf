@@ -41,6 +41,24 @@ locals {
     for index, item in var.extra_access_entries : "extra_${index}" => item
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
+
+  # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately
+  cluster_addon_defaults = {
+    "vpc-cni"    = { most_recent = true, before_compute = true }
+    "kube-proxy" = { most_recent = true }
+    "coredns"    = { most_recent = true }
+  }
+  cluster_addons_enabled = {
+    "vpc-cni"    = var.stack_enable_vpc_cni_addon
+    "kube-proxy" = var.stack_enable_kube_proxy_addon
+    "coredns"    = var.stack_enable_coredns_addon
+  }
+  cluster_addons = {
+    for name, enabled in local.cluster_addons_enabled : name =>
+    merge(local.cluster_addon_defaults[name], try(var.stack_cluster_addons_overrides[name], {}))
+    if enabled
+  }
+
   # See https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/api/
   cloudinit_pre_nodeadm = [
     {
@@ -165,6 +183,7 @@ module "eks" {
 
   vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
   subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
+  addons         = local.cluster_addons
   create_kms_key = var.stack_enable_cluster_kms
   enable_irsa    = true
   encryption_config = var.stack_enable_cluster_kms ? {
@@ -191,7 +210,7 @@ module "eks" {
         http_tokens                 = "required"
       }
       labels                = var.initial_node_labels
-      cloudinit_pre_nodeadm = var.stack_use_vpc_cni_max_pods ? [] : local.cloudinit_pre_nodeadm
+      cloudinit_pre_nodeadm = var.stack_enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
       block_device_mappings = {
         xvda = {
           device_name = "/dev/xvda"
