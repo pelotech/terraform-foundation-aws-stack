@@ -227,7 +227,7 @@ module "eks" {
         http_put_response_hop_limit = 2
         http_tokens                 = "required"
       }
-      labels = var.initial_node_labels
+      labels                = var.initial_node_labels
       cloudinit_pre_nodeadm = var.stack_enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
       block_device_mappings = {
         xvda = {
