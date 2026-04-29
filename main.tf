@@ -42,11 +42,25 @@ locals {
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
 
+  # OVERWRITE on create lets AWS adopt any pre-existing self-managed daemonsets into the managed-addons API
   # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately
   cluster_addon_defaults = {
-    "vpc-cni"    = { most_recent = true, before_compute = true }
-    "kube-proxy" = { most_recent = true }
-    "coredns"    = { most_recent = true }
+    "vpc-cni" = {
+      most_recent                 = true
+      before_compute              = true
+      resolve_conflicts_on_create = "OVERWRITE"
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+    "kube-proxy" = {
+      most_recent                 = true
+      resolve_conflicts_on_create = "OVERWRITE"
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
+    "coredns" = {
+      most_recent                 = true
+      resolve_conflicts_on_create = "OVERWRITE"
+      resolve_conflicts_on_update = "OVERWRITE"
+    }
   }
   cluster_addons_enabled = {
     "vpc-cni"    = var.stack_enable_vpc_cni_addon
@@ -180,12 +194,11 @@ module "eks" {
   endpoint_private_access       = true
   endpoint_public_access        = var.cluster_endpoint_public_access
   enabled_log_types             = var.cluster_enabled_log_types
-
-  vpc_id         = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
-  subnet_ids     = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
-  addons         = local.cluster_addons
-  create_kms_key = var.stack_enable_cluster_kms
-  enable_irsa    = true
+  vpc_id                        = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
+  subnet_ids                    = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
+  addons                        = local.cluster_addons
+  create_kms_key                = var.stack_enable_cluster_kms
+  enable_irsa                   = true
   encryption_config = var.stack_enable_cluster_kms ? {
     "resources" : [
       "secrets"

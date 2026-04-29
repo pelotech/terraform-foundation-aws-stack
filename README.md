@@ -7,41 +7,56 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 
 ## Upgrading to v7.0.0 (breaking changes)
 
-This release adds explicit Terraform-managed cluster addons (`vpc-cni`,
-`kube-proxy`, `coredns`) with per-addon enable toggles, and removes the
-`stack_use_vpc_cni_max_pods` variable.
+This release puts the three core EKS addons (`vpc-cni`, `kube-proxy`,
+`coredns`) under Terraform management via the EKS managed-addons API, with
+per-addon enable toggles. `stack_use_vpc_cni_max_pods` is removed.
 
-**`stack_use_vpc_cni_max_pods` is removed.** The new `stack_enable_vpc_cni_addon`
-variable drives both addon install *and* the nodeadm `maxPods=110` cloudinit:
+### Existing clusters: zero-disruption adoption
 
-| Old setting                            | New setting                          | Behavior                                                  |
-| -------------------------------------- | ------------------------------------ | --------------------------------------------------------- |
-| `stack_use_vpc_cni_max_pods = false` (default) | `stack_enable_vpc_cni_addon = false` (default) | `maxPods=110` cloudinit applied; install vpc-cni out-of-band or use a non-vpc-cni CNI |
-| `stack_use_vpc_cni_max_pods = true`    | `stack_enable_vpc_cni_addon = true`  | No maxPods cap; this module installs vpc-cni as a managed addon |
+EKS bootstraps every new cluster with self-managed `aws-node`, `kube-proxy`,
+and `coredns` daemonsets. The module now installs these as managed addons
+with `resolve_conflicts_on_create = "OVERWRITE"`, so AWS adopts the existing
+self-managed copies on first apply rather than failing with
+`ResourceInUseException`. No pod restarts or workload disruption beyond
+what AWS does internally on adoption.
 
-If you were running vpc-cni out-of-band (Helm/ArgoCD) and had
-`stack_use_vpc_cni_max_pods = true`, you have two paths:
+After upgrade, `terraform plan` against an existing cluster will show
+`+ create` for each enabled addon — that is the adoption operation, not a
+fresh install.
 
-1. **Move vpc-cni under Terraform management** — set
-   `stack_enable_vpc_cni_addon = true` and uninstall your out-of-band copy.
-2. **Keep your out-of-band install** — drop `stack_use_vpc_cni_max_pods` and
-   accept the new `maxPods=110` cap (or override pod density per-CNI in your
-   CNI tooling).
+### `stack_use_vpc_cni_max_pods` is removed
+
+The new `stack_enable_vpc_cni_addon` (default `true`) drives both addon
+install *and* the nodeadm `maxPods=110` cloudinit:
+
+| Old setting                                     | New equivalent                                | Behavior                                                                            |
+| ----------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `stack_use_vpc_cni_max_pods = false` (default)  | `stack_enable_vpc_cni_addon = true` (default) | vpc-cni managed by this module; pod density follows vpc-cni's ENI math (no 110 cap) |
+| `stack_use_vpc_cni_max_pods = true`             | `stack_enable_vpc_cni_addon = false`          | vpc-cni is **not** installed; `maxPods=110` cloudinit applied for an alternative CNI |
+
+> **Heads-up for users who left `stack_use_vpc_cni_max_pods` at its old
+> default (`false`):** you previously had a hardcoded `maxPods=110` cap.
+> After upgrade you get vpc-cni's ENI-based pod density instead, which on
+> larger instance types is significantly higher. If your scheduling
+> assumptions depend on the 110 cap, pin it via
+> `stack_cluster_addons_overrides` or your node group config.
+
+### Switching to an alternative CNI (Cilium, Kube-OVN)
+
+Set `stack_enable_vpc_cni_addon = false`. The 110-pod nodeadm cloudinit is
+applied automatically and you install your CNI out-of-band (Helm, ArgoCD)
+using the existing outputs (`eks_cluster_endpoint`,
+`eks_cluster_certificate_authority_data`, `eks_oidc_provider_arn`,
+`cluster_security_group_id`, `node_security_group_id`, `vpc`).
 
 ## CNI selection
 
-This module manages the three core EKS addons and leaves CNI install for
-non-vpc-cni options to consumers (Helm, ArgoCD, etc.) using the existing
-outputs (`eks_cluster_endpoint`, `eks_cluster_certificate_authority_data`,
-`eks_oidc_provider_arn`, `cluster_security_group_id`, `node_security_group_id`,
-`vpc`).
-
 | CNI       | `stack_enable_vpc_cni_addon` | `stack_enable_kube_proxy_addon` | Notes                                                            |
 | --------- | ---------------------------- | ------------------------------- | ---------------------------------------------------------------- |
-| vpc-cni   | `true`                       | `true` (default)                | AWS native. IRSA / prefix delegation via `*_overrides`.          |
-| Cilium    | `false` (default)            | `false` for kube-proxy-replace  | Install via Helm post-bootstrap. See Cilium docs for EKS.        |
-| Kube-OVN  | `false` (default)            | `true` (default)                | Install via Helm/ArgoCD post-bootstrap.                          |
-| Other     | `false` (default)            | varies                          | Anything that wants a clean slate works the same way.            |
+| vpc-cni   | `true` (default)             | `true` (default)                | AWS native. IRSA / prefix delegation via `*_overrides`.          |
+| Cilium    | `false`                      | `false` for kube-proxy-replace  | Install via Helm post-bootstrap. See Cilium docs for EKS.        |
+| Kube-OVN  | `false`                      | `true` (default)                | Install via Helm/ArgoCD post-bootstrap.                          |
+| Other     | `false`                      | varies                          | Anything that wants a clean slate works the same way.            |
 
 ### Example: Cilium with kube-proxy replacement
 
@@ -156,7 +171,7 @@ stack_cluster_addons_overrides = {
 | <a name="input_stack_enable_coredns_addon"></a> [stack\_enable\_coredns\_addon](#input\_stack\_enable\_coredns\_addon) | Install coredns as a managed addon. Note: coredns will not schedule until a CNI is running and nodes are Ready. | `bool` | `true` | no |
 | <a name="input_stack_enable_default_eks_managed_node_group"></a> [stack\_enable\_default\_eks\_managed\_node\_group](#input\_stack\_enable\_default\_eks\_managed\_node\_group) | Ability to disable default node group | `bool` | `true` | no |
 | <a name="input_stack_enable_kube_proxy_addon"></a> [stack\_enable\_kube\_proxy\_addon](#input\_stack\_enable\_kube\_proxy\_addon) | Install kube-proxy as a managed addon. Set false when using Cilium with kube-proxy replacement enabled. | `bool` | `true` | no |
-| <a name="input_stack_enable_vpc_cni_addon"></a> [stack\_enable\_vpc\_cni\_addon](#input\_stack\_enable\_vpc\_cni\_addon) | Install AWS VPC CNI as a managed addon. Set false when using Cilium, Kube-OVN, or another CNI installed out-of-band. When false, nodeadm maxPods=110 cloudinit is applied automatically. | `bool` | `false` | no |
+| <a name="input_stack_enable_vpc_cni_addon"></a> [stack\_enable\_vpc\_cni\_addon](#input\_stack\_enable\_vpc\_cni\_addon) | Install AWS VPC CNI as a managed addon. Set false when using Cilium, Kube-OVN, or another CNI installed out-of-band. When false, nodeadm maxPods=110 cloudinit is applied automatically. | `bool` | `true` | no |
 | <a name="input_stack_existing_vpc_config"></a> [stack\_existing\_vpc\_config](#input\_stack\_existing\_vpc\_config) | Setting the VPC | <pre>object({<br/>    vpc_id     = string<br/>    subnet_ids = list(string)<br/>  })</pre> | `null` | no |
 | <a name="input_stack_name"></a> [stack\_name](#input\_stack\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_stack_pelotech_nat_ami_name_filter"></a> [stack\_pelotech\_nat\_ami\_name\_filter](#input\_stack\_pelotech\_nat\_ami\_name\_filter) | ami name filter to find the correct ami | `string` | `"fck-nat-al2023-hvm-*"` | no |
