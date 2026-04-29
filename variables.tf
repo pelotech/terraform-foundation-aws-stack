@@ -33,8 +33,8 @@ variable "stack_tags" {
 }
 variable "stack_enable_vpc_cni_addon" {
   type        = bool
-  default     = true
-  description = "Install AWS VPC CNI as a managed addon. Set false when using Cilium, Kube-OVN, or another CNI installed out-of-band. When false, nodeadm maxPods=110 cloudinit is applied automatically."
+  default     = false
+  description = "Install AWS VPC CNI as a managed addon. Defaults to false so the cluster comes up CNI-less and consumers pick a CNI (Cilium, Kube-OVN, or vpc-cni). Set true to install vpc-cni as a managed addon. When false, nodeadm maxPods=110 cloudinit is applied automatically."
 }
 variable "stack_enable_kube_proxy_addon" {
   type        = bool

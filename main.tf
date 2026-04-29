@@ -42,22 +42,27 @@ locals {
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
 
-  # OVERWRITE on create lets AWS adopt any pre-existing self-managed daemonsets into the managed-addons API
-  # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately
+  # OVERWRITE on create lets AWS adopt any pre-existing self-managed daemonsets into the managed-addons API.
+  # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately.
+  # preserve=false overrides the upstream module default (true) so disabling an addon also removes
+  # its underlying workload (e.g. aws-node DaemonSet) — required for clean CNI swaps.
   cluster_addon_defaults = {
     "vpc-cni" = {
       most_recent                 = true
       before_compute              = true
+      preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
     }
     "kube-proxy" = {
       most_recent                 = true
+      preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
     }
     "coredns" = {
       most_recent                 = true
+      preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
     }
@@ -222,7 +227,7 @@ module "eks" {
         http_put_response_hop_limit = 2
         http_tokens                 = "required"
       }
-      labels                = var.initial_node_labels
+      labels = var.initial_node_labels
       cloudinit_pre_nodeadm = var.stack_enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
       block_device_mappings = {
         xvda = {
