@@ -31,10 +31,25 @@ variable "stack_tags" {
   }
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
-variable "stack_use_vpc_cni_max_pods" {
+variable "stack_enable_vpc_cni_addon" {
   type        = bool
   default     = false
-  description = "Set to true if using the vpc cni - otherwise defaults to 110 max pods"
+  description = "Install AWS VPC CNI as a managed addon. Defaults to false so the cluster comes up CNI-less and consumers pick a CNI (Cilium, Kube-OVN, or vpc-cni). Set true to install vpc-cni as a managed addon. When false, nodeadm maxPods=110 cloudinit is applied automatically."
+}
+variable "stack_enable_kube_proxy_addon" {
+  type        = bool
+  default     = true
+  description = "Install kube-proxy as a managed addon. Set false when using Cilium with kube-proxy replacement enabled."
+}
+variable "stack_enable_coredns_addon" {
+  type        = bool
+  default     = true
+  description = "Install coredns as a managed addon. Note: coredns will not schedule until a CNI is running and nodes are Ready."
+}
+variable "stack_cluster_addons_overrides" {
+  type        = any
+  default     = {}
+  description = "Per-addon overrides keyed by addon name (e.g. \"vpc-cni\", \"kube-proxy\", \"coredns\"). Merges over module defaults — use for version pinning, vpc-cni prefix delegation, custom networking, etc. Accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map."
 }
 variable "stack_enable_cluster_kms" {
   type        = bool
