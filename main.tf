@@ -255,7 +255,7 @@ module "karpenter" {
 # IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.5.0"
+  version = "6.6.0"
 
   use_name_prefix = false
   name            = "${var.stack_name}-alb-role"
@@ -276,7 +276,7 @@ module "load_balancer_controller_irsa_role" {
 
 module "ebs_csi_driver_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.5.0"
+  version = "6.6.0"
 
   use_name_prefix = false
   name            = "${var.stack_name}-ebs-csi-driver-role"
@@ -320,7 +320,7 @@ module "s3_csi" {
 module "s3_driver_irsa_role" {
   count   = var.stack_create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.5.0"
+  version = "6.6.0"
 
   use_name_prefix = false
   name            = "${var.stack_name}-s3-csi-driver-role"
@@ -343,7 +343,7 @@ module "s3_driver_irsa_role" {
 module "external_dns_irsa_role" {
   count   = var.stack_create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.5.0"
+  version = "6.6.0"
 
   use_name_prefix = false
   name            = "${var.stack_name}-external-dns-role"
@@ -367,7 +367,7 @@ module "external_dns_irsa_role" {
 module "cert_manager_irsa_role" {
   count   = var.stack_create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.5.0"
+  version = "6.6.0"
 
   use_name_prefix = false
   name            = "${var.stack_name}-cert-manager-role"
