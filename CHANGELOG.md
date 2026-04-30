@@ -1,5 +1,22 @@
 # Changelog
 
+## [7.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v6.0.1...v7.0.0) (2026-04-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* make vpc-cni opt-in and add explicit addon management ([#116](https://github.com/pelotech/terraform-foundation-aws-stack/issues/116))
+
+### Features
+
+* make vpc-cni opt-in and add explicit addon management ([#116](https://github.com/pelotech/terraform-foundation-aws-stack/issues/116)) ([d84cd31](https://github.com/pelotech/terraform-foundation-aws-stack/commit/d84cd31387db4dabc8cb315f0ad5a2f81d813ef2))
+
+
+### Chores
+
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.19.0 ([#115](https://github.com/pelotech/terraform-foundation-aws-stack/issues/115)) ([5e1a517](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5e1a517d414691ae849ec5b733ae52a7f6f64706))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v6.6.0 ([#117](https://github.com/pelotech/terraform-foundation-aws-stack/issues/117)) ([4f0517c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/4f0517c034a75334fe853889d2c11e88bc2c0309))
+
 ## [6.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v6.0.0...v6.0.1) (2026-04-25)
 
 
