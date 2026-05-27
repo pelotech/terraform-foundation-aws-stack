@@ -241,6 +241,12 @@ variable "vpc_endpoints" {
   default     = []
 }
 
+variable "node_iam_additional_policies" {
+  type        = map(string)
+  default     = {}
+  description = "Map of IAM policy name to ARN to attach to the managed node group IAM role."
+}
+
 variable "cluster_enabled_log_types" {
   type        = list(string)
   default     = []
