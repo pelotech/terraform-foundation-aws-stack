@@ -1,5 +1,18 @@
 # Changelog
 
+## [7.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.0.0...v7.1.0) (2026-05-27)
+
+
+### Features
+
+* add node IAM additional policies variable ([#98](https://github.com/pelotech/terraform-foundation-aws-stack/issues/98)) ([5bf5093](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5bf5093bede1ccadf35724b41df85e3aca2e5cf2))
+* add pre-bootstrap user data for EKS nodes ([#97](https://github.com/pelotech/terraform-foundation-aws-stack/issues/97)) ([affd694](https://github.com/pelotech/terraform-foundation-aws-stack/commit/affd694280bb66ce6c5ab936e3b89d1bf7c5b106))
+
+
+### Bug Fixes
+
+* add missing var `node_iam_additional_policies` ([#124](https://github.com/pelotech/terraform-foundation-aws-stack/issues/124)) ([f23f652](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f23f65244c1c925f890139efe374a6c3fd4af0bd))
+
 ## [7.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v6.0.1...v7.0.0) (2026-04-30)
 
 
