@@ -144,7 +144,7 @@ stack_cluster_addons_overrides = {
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.42.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.46.0 |
 
 ## Modules
 
@@ -188,7 +188,9 @@ stack_cluster_addons_overrides = {
 | <a name="input_initial_node_max_size"></a> [initial\_node\_max\_size](#input\_initial\_node\_max\_size) | max size of the initial managed node group | `number` | `6` | no |
 | <a name="input_initial_node_min_size"></a> [initial\_node\_min\_size](#input\_initial\_node\_min\_size) | minimum size of the initial managed node group | `number` | `2` | no |
 | <a name="input_initial_node_taints"></a> [initial\_node\_taints](#input\_initial\_node\_taints) | taints for the initial managed node group | `map(object({ key = string, value = string, effect = string }))` | <pre>{<br/>  "criticalAddonsOnly": {<br/>    "effect": "NO_SCHEDULE",<br/>    "key": "CriticalAddonsOnly",<br/>    "value": "true"<br/>  },<br/>  "nidhogg": {<br/>    "effect": "NO_SCHEDULE",<br/>    "key": "nidhogg.uswitch.com/kube-system.kube-multus-ds",<br/>    "value": "true"<br/>  }<br/>}</pre> | no |
+| <a name="input_node_iam_additional_policies"></a> [node\_iam\_additional\_policies](#input\_node\_iam\_additional\_policies) | Map of IAM policy name to ARN to attach to the managed node group IAM role. | `map(string)` | `{}` | no |
 | <a name="input_permissions_boundary"></a> [permissions\_boundary](#input\_permissions\_boundary) | IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition. | `string` | `""` | no |
+| <a name="input_pre_bootstrap_user_data"></a> [pre\_bootstrap\_user\_data](#input\_pre\_bootstrap\_user\_data) | Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages. | `string` | `null` | no |
 | <a name="input_s3_csi_driver_bucket_arns"></a> [s3\_csi\_driver\_bucket\_arns](#input\_s3\_csi\_driver\_bucket\_arns) | existing buckets the s3 CSI driver should have access to | `list(string)` | `[]` | no |
 | <a name="input_s3_csi_driver_create_bucket"></a> [s3\_csi\_driver\_create\_bucket](#input\_s3\_csi\_driver\_create\_bucket) | create a new bucket for use with the s3 CSI driver | `bool` | `true` | no |
 | <a name="input_stack_admin_arns"></a> [stack\_admin\_arns](#input\_stack\_admin\_arns) | arn to the roles for the cluster admins role | `list(string)` | `[]` | no |
