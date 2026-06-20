@@ -58,7 +58,9 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: planetscale/ghcommit-action@a6b150b81dca5dd027baa898604418eec9e11465 # v0.2.22
         with:
-          commit_message: "docs: regenerate terraform-docs"
+          # [skip ci]: the docs were already verified by the pre-commit step in
+          # this same job, so the commit does not need to re-trigger workflows.
+          commit_message: "docs: regenerate terraform-docs [skip ci]"
           repo: ${{ github.repository }}
           branch: ${{ github.head_ref }}
           file_pattern: README.md
