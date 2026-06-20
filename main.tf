@@ -157,7 +157,7 @@ resource "aws_eip" "main" {
 
 module "fck_nat" {
   source             = "RaJiska/fck-nat/aws"
-  version            = "1.4.0"
+  version            = "1.6.0"
   count              = var.stack_pelotech_nat_enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
   name               = "${var.stack_name}-${module.vpc.azs[count.index]}"
