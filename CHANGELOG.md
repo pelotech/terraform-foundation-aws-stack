@@ -1,5 +1,33 @@
 # Changelog
 
+## [7.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.1.0...v7.1.1) (2026-06-20)
+
+
+### Chores
+
+* add write back for updates to readme from renovate PRs or general changes ([71e828d](https://github.com/pelotech/terraform-foundation-aws-stack/commit/71e828dd122284ce96a406cfea354bf02db1383d))
+* **config:** migrate Renovate config ([#131](https://github.com/pelotech/terraform-foundation-aws-stack/issues/131)) ([f9dd9c2](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f9dd9c2cbca8eecfdcd82c28958af8514c561b84))
+* **deps:** update actions/checkout action to v7 ([#129](https://github.com/pelotech/terraform-foundation-aws-stack/issues/129)) ([2c857f1](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2c857f1effcdb051046d41391ee30d9d2d50710a))
+* **deps:** update aquasecurity/setup-trivy action to v0.3.1 ([#127](https://github.com/pelotech/terraform-foundation-aws-stack/issues/127)) ([ff81911](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ff819111d92b6a7a9107e99414c67a2ac344e7d2))
+* **deps:** update dependency aquasecurity/trivy to v0.71.2 ([#126](https://github.com/pelotech/terraform-foundation-aws-stack/issues/126)) ([52ce14f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/52ce14f2c931b88592fc228f439e996d844a9594))
+* **deps:** update hashicorp/setup-terraform action to v4.0.1 ([#132](https://github.com/pelotech/terraform-foundation-aws-stack/issues/132)) ([bd0eb9c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bd0eb9c37a4890db0614dafa7f0510a0331a7748))
+* **deps:** update min terraform/tofu version to 1.9.0 ([6aa8e0b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6aa8e0b60fe70086d7bc026530ba1cbc3e9f6148))
+* **deps:** update terraform rajiska/fck-nat/aws to v1.6.0 ([#122](https://github.com/pelotech/terraform-foundation-aws-stack/issues/122)) ([2947a0d](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2947a0de98a2993069a06b7b95d3495e703a40d4))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.14.0 ([#119](https://github.com/pelotech/terraform-foundation-aws-stack/issues/119)) ([27f5483](https://github.com/pelotech/terraform-foundation-aws-stack/commit/27f548388292b248d14fcc5a10f83e2136e43fc6))
+* **deps:** update terraform-aws-modules/eks to v21.23.0 ([#120](https://github.com/pelotech/terraform-foundation-aws-stack/issues/120)) ([645ce84](https://github.com/pelotech/terraform-foundation-aws-stack/commit/645ce844ef7ed9adc8ead8286d82beb24dd1e1a7))
+* **deps:** update terraform-aws-modules/iam to v6.6.1 ([#125](https://github.com/pelotech/terraform-foundation-aws-stack/issues/125)) ([f9f11e3](https://github.com/pelotech/terraform-foundation-aws-stack/commit/f9f11e34aa4fc35eb76707174f02da0327217b00))
+* fix for commit back with renovate and don't re-run workflow ([14054ca](https://github.com/pelotech/terraform-foundation-aws-stack/commit/14054cacffb8b162224f7ad3db85157bf4ddb29b))
+* switch renovate to best-practices ([3752496](https://github.com/pelotech/terraform-foundation-aws-stack/commit/37524965511da726dd8a2fd27823c717a9f5c457))
+* switch to use release-please github app for release please and doc commit back to keep the actiosn running ([5655bdf](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5655bdf38f468c3e5690fb29085940c501011374))
+* update to TF 1.9 ([5c507b7](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5c507b772e0d9eecc6e65f3d83dd59698ec3ac5a))
+* update to use release-please email ([120354a](https://github.com/pelotech/terraform-foundation-aws-stack/commit/120354a66f3adcc62e4101e141f185aea4315d68))
+
+
+### Docs
+
+* disable docs tie to lockfile ([3aaafe4](https://github.com/pelotech/terraform-foundation-aws-stack/commit/3aaafe4d7f21a0a3c4521b22dce578beed78803d))
+* update ([90184c4](https://github.com/pelotech/terraform-foundation-aws-stack/commit/90184c40532a6611c776a33fce9f8477c5db4ea5))
+
 ## [7.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.0.0...v7.1.0) (2026-05-27)
 
 
