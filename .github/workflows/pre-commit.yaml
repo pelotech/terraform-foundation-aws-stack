@@ -6,16 +6,23 @@ on:
   pull_request:
     branches:
       - main
+permissions:
+  contents: write
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.head_ref }}
+          # Do not leave the token in .git/config; untrusted PR hooks run in
+          # later steps. Write-back uses the GitHub API with GH_TOKEN instead.
+          persist-credentials: false
       - name: install pre-commit
         run: pip install pre-commit
 
       - name: Terraform
-        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
           terraform_version: "1.5.7"
 
@@ -42,6 +49,21 @@ jobs:
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.71.2
+
+      - name: Regenerate terraform-docs
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: pre-commit run terraform_docs --all-files || true
+
+      - name: Commit docs changes back to PR branch (signed)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: planetscale/ghcommit-action@a6b150b81dca5dd027baa898604418eec9e11465 # v0.2.22
+        with:
+          commit_message: "docs: regenerate terraform-docs"
+          repo: ${{ github.repository }}
+          branch: ${{ github.head_ref }}
+          file_pattern: README.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: pre-commit
         run: pre-commit run --all-files --show-diff-on-failure
