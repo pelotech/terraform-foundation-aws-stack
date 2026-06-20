@@ -4,10 +4,10 @@
   ],
   dependencyDashboard: true,
   // CI regenerates terraform-docs and commits the README back to the PR branch
-  // as github-actions[bot]. Without this, Renovate sees a foreign author and
+  // using a GitHub App token. Without this, Renovate sees a foreign author and
   // stops auto-rebasing the branch.
   gitIgnoredAuthors: [
-    '41898282+github-actions[bot]@users.noreply.github.com',
+    '245757523+pt-release-please[bot]@users.noreply.github.com',
   ],
   packageRules: [
     {
