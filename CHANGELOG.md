@@ -1,5 +1,13 @@
 # Changelog
 
+## [7.1.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.1.1...v7.1.2) (2026-06-25)
+
+
+### Chores
+
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.14.1 ([#133](https://github.com/pelotech/terraform-foundation-aws-stack/issues/133)) ([3c1a87f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/3c1a87f7f6f4e4fc532c221a1fdd64d5c6edbabf))
+* **deps:** update terraform-aws-modules/eks ([#134](https://github.com/pelotech/terraform-foundation-aws-stack/issues/134)) ([ce31857](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ce318576b8918f4be2b85a5ade108fea309d0a7c))
+
 ## [7.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.1.0...v7.1.1) (2026-06-20)
 
 
