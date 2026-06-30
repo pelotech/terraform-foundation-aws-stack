@@ -48,7 +48,7 @@ jobs:
       - name: install trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
-          version: v0.71.2
+          version: v0.72.0
 
       - name: Regenerate terraform-docs
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
