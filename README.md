@@ -5,6 +5,50 @@ This is the terraform module that helps bootstrap foundation in AWS
 
 This project uses [release-please](https://github.com/googleapis/release-please) for the release flow of contributions
 
+## Upgrading to v8.0.0 (breaking changes)
+
+This release introduces a single **`stack_cni`** selector that drives the
+initial node group's taints/labels *and* the vpc-cni/kube-proxy addon
+enablement from one CNI profile. The supported profiles are `cilium`,
+`kube-ovn`, and `vpc-cni`, and the **default is now `cilium`** (previously the
+defaults silently assumed kube-ovn + multus/nidhogg).
+
+| CNI profile | Taints                                                             | Labels                  | vpc-cni | kube-proxy |
+| ----------- | ------------------------------------------------------------------ | ----------------------- | ------- | ---------- |
+| `cilium`    | `CriticalAddonsOnly`, `node.cilium.io/agent-not-ready:NO_EXECUTE`  | none                    | off     | off        |
+| `kube-ovn`  | `CriticalAddonsOnly`, `nidhogg.uswitch.com/...kube-multus-ds`      | `kube-ovn/role=master`  | off     | on         |
+| `vpc-cni`   | `CriticalAddonsOnly`                                               | none                    | on      | on         |
+
+### What happens on first apply against an existing cluster
+
+- **Set `stack_cni` to match your current CNI.** Consumers previously on the
+  defaults were effectively running kube-ovn — set `stack_cni = "kube-ovn"`
+  to preserve the prior taints/labels and avoid churn.
+- **Leaving the default (`cilium`) changes node group taints/labels**, which
+  forces the managed node group to roll/replace nodes. Only take the default
+  if you intend to run Cilium.
+- `stack_enable_vpc_cni_addon` / `stack_enable_kube_proxy_addon` defaults
+  changed from `false`/`true` to **`null`** — they now *derive* from
+  `stack_cni`. Set them to an explicit `true`/`false` to override the profile.
+
+### Overriding taints/labels
+
+The CNI preset is the base; you can extend or fully replace it:
+
+```hcl
+stack_cni = "cilium"
+
+# Add taints/labels on top of the preset (caller keys win):
+initial_node_taints_extra = {
+  spot = { key = "spot", value = "true", effect = "NO_SCHEDULE" }
+}
+initial_node_labels_extra = { "team" = "platform" }
+
+# ...or replace the preset entirely (ignores _extra; use {} for none):
+# initial_node_taints = { only = { key = "only", value = "true", effect = "NO_SCHEDULE" } }
+# initial_node_labels = {}
+```
+
 ## Upgrading to v7.0.0 (breaking changes)
 
 This release puts the three core EKS addons under Terraform management via
@@ -57,8 +101,8 @@ remove it. Two paths:
 
 ### Switching to an alternative CNI (Cilium, Kube-OVN)
 
-The default behavior already supports this: keep
-`stack_enable_vpc_cni_addon = false`, install your CNI out-of-band (Helm,
+The default behavior already supports this: select the CNI with `stack_cni`
+(see "CNI selection" below), install your CNI out-of-band (Helm,
 ArgoCD) using the existing outputs (`eks_cluster_endpoint`,
 `eks_cluster_certificate_authority_data`, `eks_oidc_provider_arn`,
 `cluster_security_group_id`, `node_security_group_id`, `vpc`). The
@@ -76,39 +120,104 @@ ArgoCD) using the existing outputs (`eks_cluster_endpoint`,
 
 ## CNI selection
 
-| CNI       | `stack_enable_vpc_cni_addon` | `stack_enable_kube_proxy_addon` | Notes                                                            |
-| --------- | ---------------------------- | ------------------------------- | ---------------------------------------------------------------- |
-| vpc-cni   | `true`                       | `true` (default)                | AWS native. IRSA / prefix delegation via `*_overrides`.          |
-| Cilium    | `false` (default)            | `false` for kube-proxy-replace  | Install via Helm post-bootstrap. See Cilium docs for EKS.        |
-| Kube-OVN  | `false` (default)            | `true` (default)                | Install via Helm/ArgoCD post-bootstrap.                          |
-| Other     | `false` (default)            | varies                          | Anything that wants a clean slate works the same way.            |
+Pick a CNI with `stack_cni` — it sets the initial node group taints/labels and
+the vpc-cni/kube-proxy addon toggles to match. All values remain overridable
+(see below).
+
+| `stack_cni`         | vpc-cni | kube-proxy | Node taints/labels                                     | Notes                                                       |
+| ------------------- | ------- | ---------- | ------------------------------------------------------ | ----------------------------------------------------------- |
+| `cilium` (default)  | off     | off        | `CriticalAddonsOnly` + cilium agent-not-ready          | Install Cilium (kube-proxy replacement) via Helm.           |
+| `kube-ovn`          | off     | on         | `CriticalAddonsOnly` + nidhogg/multus, `kube-ovn/role` | Install via Helm/ArgoCD post-bootstrap.                     |
+| `vpc-cni`           | on      | on         | `CriticalAddonsOnly`                                    | AWS native. IRSA / prefix delegation via `*_overrides`.     |
+
+For any other CNI, pick the closest profile and override the addon toggles /
+taints / labels as needed — anything that wants a clean slate works the same.
 
 ### Example: Cilium with kube-proxy replacement
 
 ```hcl
 module "foundation" {
   # ...
-  stack_enable_vpc_cni_addon    = false
-  stack_enable_kube_proxy_addon = false
-  stack_enable_coredns_addon    = true
+  stack_cni = "cilium" # default; vpc-cni + kube-proxy derived off
 }
 ```
 
 Then install Cilium with `kubeProxyReplacement=true` per the
 [Cilium EKS install guide](https://docs.cilium.io/en/stable/installation/k8s-install-helm/).
 
+#### kube-proxy replacement bootstrap (`k8sServiceHost`)
+
+With the `cilium` profile, kube-proxy is **not** installed, so nothing programs
+the `kubernetes` Service ClusterIP → API server rule until Cilium is up. The
+Cilium agent therefore cannot reach the API server via the in-cluster ClusterIP
+during bootstrap (`dial tcp <clusterIP>:443: connect: no route to host`), and
+cluster DNS can't help (it resolves to that same unroutable ClusterIP, and
+CoreDNS needs the CNI running first). You must point Cilium at the real API
+endpoint. Use the `cilium_k8s_service_host` output (the EKS endpoint DNS name,
+which resolves via normal DNS with no bootstrap dependency):
+
+```hcl
+set { name = "kubeProxyReplacement", value = "true" }
+set { name = "k8sServiceHost",       value = module.foundation.cilium_k8s_service_host }
+set { name = "k8sServicePort",       value = "443" }
+```
+
+To avoid this requirement entirely, keep kube-proxy running — set
+`stack_enable_kube_proxy_addon = true` and install Cilium with
+`kubeProxyReplacement=false` — at the cost of the eBPF kube-proxy-replacement
+benefits (DSR, no iptables scaling cliff).
+
 ### Example: Kube-OVN
 
 ```hcl
 module "foundation" {
   # ...
-  stack_enable_vpc_cni_addon = false
-  # kube-proxy and coredns stay enabled
+  stack_cni = "kube-ovn" # vpc-cni off, kube-proxy on, multus/nidhogg taint + kube-ovn/role label
 }
 ```
 
 Install Kube-OVN per the
 [upstream install docs](https://kubeovn.github.io/docs/stable/en/start/one-step-install/).
+
+### Bootstrapping the CNI in one apply (`cni-bootstrap` module)
+
+On a CNI-less cluster (`cilium`/`kube-ovn`), the initial node group never reaches
+`Ready` until a CNI is installed, so `terraform apply` otherwise blocks ~60m on
+the node group before failing. The companion module `modules/cni-bootstrap`
+installs the CNI via Helm **concurrently** with the node group: the agent
+DaemonSet (hostNetwork, tolerating `NotReady` + the `node.cilium.io/agent-not-ready`
+taint) lands on nodes as they register and flips them `Ready` inside the wait
+window — one apply, no swap.
+
+Configure a `helm` provider from this module's outputs and use the submodule.
+**Do not** make the submodule `depend_on` the node group, or they'd serialize and
+the hang returns.
+
+```hcl
+provider "helm" {
+  kubernetes = {
+    host                   = module.foundation.eks_cluster_endpoint
+    cluster_ca_certificate = base64decode(module.foundation.eks_cluster_certificate_authority_data)
+    exec = {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.foundation.eks_cluster_name]
+    }
+  }
+}
+
+module "cni_bootstrap" {
+  source           = "github.com/pelotech/terraform-foundation-aws-stack//modules/cni-bootstrap"
+  cni              = "cilium" # cilium | kube-ovn | custom
+  k8s_service_host = module.foundation.cilium_k8s_service_host # for cilium kube-proxy replacement
+}
+```
+
+`cni = "custom"` installs any Helm-packaged CNI via `custom_chart`; layer extra
+values with `helm_set` / `helm_values`. See `modules/cni-bootstrap/README.md`.
+As a safety net, set `initial_node_timeouts = { create = "20m" }` so a failed
+bring-up fails fast instead of 60m. This replaces the imperative
+`helm upgrade --install` bootstrap step.
 
 ### Power-user overrides
 
@@ -184,10 +293,13 @@ stack_cluster_addons_overrides = {
 | <a name="input_eks_cluster_version"></a> [eks\_cluster\_version](#input\_eks\_cluster\_version) | Kubernetes version to set for the cluster | `string` | `"1.35"` | no |
 | <a name="input_extra_access_entries"></a> [extra\_access\_entries](#input\_extra\_access\_entries) | EKS access entries needed by IAM roles interacting with this cluster | <pre>list(object({<br/>    principal_arn     = string<br/>    kubernetes_groups = optional(list(string))<br/>    policy_associations = optional(map(object({<br/>      policy_arn = string<br/>      access_scope = object({<br/>        type       = string<br/>        namespaces = optional(list(string))<br/>      })<br/>    })), {})<br/><br/>  }))</pre> | `[]` | no |
 | <a name="input_initial_node_desired_size"></a> [initial\_node\_desired\_size](#input\_initial\_node\_desired\_size) | desired size of the initial managed node group | `number` | `3` | no |
-| <a name="input_initial_node_labels"></a> [initial\_node\_labels](#input\_initial\_node\_labels) | labels for the initial managed node group | `map(string)` | <pre>{<br/>  "kube-ovn/role": "master"<br/>}</pre> | no |
+| <a name="input_initial_node_labels"></a> [initial\_node\_labels](#input\_initial\_node\_labels) | Full override of the initial managed node group labels. Leave null (default) to derive from stack\_cni merged with initial\_node\_labels\_extra. Set to a map to replace the CNI preset entirely (use {} for no labels). | `map(string)` | `null` | no |
+| <a name="input_initial_node_labels_extra"></a> [initial\_node\_labels\_extra](#input\_initial\_node\_labels\_extra) | Extra labels merged over the stack\_cni preset for the initial managed node group (caller keys win). Ignored when initial\_node\_labels is set. | `map(string)` | `{}` | no |
 | <a name="input_initial_node_max_size"></a> [initial\_node\_max\_size](#input\_initial\_node\_max\_size) | max size of the initial managed node group | `number` | `6` | no |
 | <a name="input_initial_node_min_size"></a> [initial\_node\_min\_size](#input\_initial\_node\_min\_size) | minimum size of the initial managed node group | `number` | `2` | no |
-| <a name="input_initial_node_taints"></a> [initial\_node\_taints](#input\_initial\_node\_taints) | taints for the initial managed node group | `map(object({ key = string, value = string, effect = string }))` | <pre>{<br/>  "criticalAddonsOnly": {<br/>    "effect": "NO_SCHEDULE",<br/>    "key": "CriticalAddonsOnly",<br/>    "value": "true"<br/>  },<br/>  "nidhogg": {<br/>    "effect": "NO_SCHEDULE",<br/>    "key": "nidhogg.uswitch.com/kube-system.kube-multus-ds",<br/>    "value": "true"<br/>  }<br/>}</pre> | no |
+| <a name="input_initial_node_taints"></a> [initial\_node\_taints](#input\_initial\_node\_taints) | Full override of the initial managed node group taints. Leave null (default) to derive from stack\_cni merged with initial\_node\_taints\_extra. Set to a map to replace the CNI preset entirely (use {} for no taints). | `map(object({ key = string, value = string, effect = string }))` | `null` | no |
+| <a name="input_initial_node_taints_extra"></a> [initial\_node\_taints\_extra](#input\_initial\_node\_taints\_extra) | Extra taints merged over the stack\_cni preset for the initial managed node group (caller keys win). Ignored when initial\_node\_taints is set. | `map(object({ key = string, value = string, effect = string }))` | `{}` | no |
+| <a name="input_initial_node_timeouts"></a> [initial\_node\_timeouts](#input\_initial\_node\_timeouts) | Timeouts for the initial managed node group's create/update/delete. null uses the AWS provider default (60m create). Set e.g. { create = "20m" } to fail fast when a CNI-less cluster's nodes never reach Ready. | <pre>object({<br/>    create = optional(string)<br/>    update = optional(string)<br/>    delete = optional(string)<br/>  })</pre> | `null` | no |
 | <a name="input_node_iam_additional_policies"></a> [node\_iam\_additional\_policies](#input\_node\_iam\_additional\_policies) | Map of IAM policy name to ARN to attach to the managed node group IAM role. | `map(string)` | `{}` | no |
 | <a name="input_permissions_boundary"></a> [permissions\_boundary](#input\_permissions\_boundary) | IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition. | `string` | `""` | no |
 | <a name="input_pre_bootstrap_user_data"></a> [pre\_bootstrap\_user\_data](#input\_pre\_bootstrap\_user\_data) | Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages. | `string` | `null` | no |
@@ -195,13 +307,14 @@ stack_cluster_addons_overrides = {
 | <a name="input_s3_csi_driver_create_bucket"></a> [s3\_csi\_driver\_create\_bucket](#input\_s3\_csi\_driver\_create\_bucket) | create a new bucket for use with the s3 CSI driver | `bool` | `true` | no |
 | <a name="input_stack_admin_arns"></a> [stack\_admin\_arns](#input\_stack\_admin\_arns) | arn to the roles for the cluster admins role | `list(string)` | `[]` | no |
 | <a name="input_stack_cluster_addons_overrides"></a> [stack\_cluster\_addons\_overrides](#input\_stack\_cluster\_addons\_overrides) | Per-addon overrides keyed by addon name (e.g. "vpc-cni", "kube-proxy", "coredns"). Merges over module defaults — use for version pinning, vpc-cni prefix delegation, custom networking, etc. Accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map. | `any` | `{}` | no |
+| <a name="input_stack_cni"></a> [stack\_cni](#input\_stack\_cni) | CNI profile driving the initial node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. Override individual pieces with initial\_node\_taints(\_extra)/initial\_node\_labels(\_extra) and the stack\_enable\_*\_addon toggles. | `string` | `"cilium"` | no |
 | <a name="input_stack_create"></a> [stack\_create](#input\_stack\_create) | should resources be created | `bool` | `true` | no |
 | <a name="input_stack_create_pelotech_nat_eip"></a> [stack\_create\_pelotech\_nat\_eip](#input\_stack\_create\_pelotech\_nat\_eip) | should create pelotech nat eip even if NAT isn't enabled - nice for getting ips created for allow lists | `bool` | `false` | no |
 | <a name="input_stack_enable_cluster_kms"></a> [stack\_enable\_cluster\_kms](#input\_stack\_enable\_cluster\_kms) | Should secrets be encrypted by kms in the cluster | `bool` | `true` | no |
 | <a name="input_stack_enable_coredns_addon"></a> [stack\_enable\_coredns\_addon](#input\_stack\_enable\_coredns\_addon) | Install coredns as a managed addon. Note: coredns will not schedule until a CNI is running and nodes are Ready. | `bool` | `true` | no |
 | <a name="input_stack_enable_default_eks_managed_node_group"></a> [stack\_enable\_default\_eks\_managed\_node\_group](#input\_stack\_enable\_default\_eks\_managed\_node\_group) | Ability to disable default node group | `bool` | `true` | no |
-| <a name="input_stack_enable_kube_proxy_addon"></a> [stack\_enable\_kube\_proxy\_addon](#input\_stack\_enable\_kube\_proxy\_addon) | Install kube-proxy as a managed addon. Set false when using Cilium with kube-proxy replacement enabled. | `bool` | `true` | no |
-| <a name="input_stack_enable_vpc_cni_addon"></a> [stack\_enable\_vpc\_cni\_addon](#input\_stack\_enable\_vpc\_cni\_addon) | Install AWS VPC CNI as a managed addon. Defaults to false so the cluster comes up CNI-less and consumers pick a CNI (Cilium, Kube-OVN, or vpc-cni). Set true to install vpc-cni as a managed addon. When false, nodeadm maxPods=110 cloudinit is applied automatically. | `bool` | `false` | no |
+| <a name="input_stack_enable_kube_proxy_addon"></a> [stack\_enable\_kube\_proxy\_addon](#input\_stack\_enable\_kube\_proxy\_addon) | Override installation of the kube-proxy managed addon. Leave null (default) to derive from stack\_cni (off for cilium kube-proxy replacement, on for kube-ovn/vpc-cni). Set true/false to force. | `bool` | `null` | no |
+| <a name="input_stack_enable_vpc_cni_addon"></a> [stack\_enable\_vpc\_cni\_addon](#input\_stack\_enable\_vpc\_cni\_addon) | Override installation of the AWS VPC CNI managed addon. Leave null (default) to derive from stack\_cni (on for vpc-cni, off for cilium/kube-ovn). Set true/false to force. When the addon is off, nodeadm maxPods=110 cloudinit is applied automatically. | `bool` | `null` | no |
 | <a name="input_stack_existing_vpc_config"></a> [stack\_existing\_vpc\_config](#input\_stack\_existing\_vpc\_config) | Setting the VPC | <pre>object({<br/>    vpc_id     = string<br/>    subnet_ids = list(string)<br/>  })</pre> | `null` | no |
 | <a name="input_stack_name"></a> [stack\_name](#input\_stack\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_stack_pelotech_nat_ami_name_filter"></a> [stack\_pelotech\_nat\_ami\_name\_filter](#input\_stack\_pelotech\_nat\_ami\_name\_filter) | ami name filter to find the correct ami | `string` | `"fck-nat-al2023-hvm-*"` | no |
@@ -218,6 +331,8 @@ stack_cluster_addons_overrides = {
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_cert_manager_role_arn"></a> [cert\_manager\_role\_arn](#output\_cert\_manager\_role\_arn) | ARN of the Cert Manager IRSA role |
+| <a name="output_cilium_k8s_service_host"></a> [cilium\_k8s\_service\_host](#output\_cilium\_k8s\_service\_host) | Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443. |
+| <a name="output_cluster_addons_enabled_resolved"></a> [cluster\_addons\_enabled\_resolved](#output\_cluster\_addons\_enabled\_resolved) | Managed addon enablement after resolving stack\_cni and the stack\_enable\_*\_addon overrides |
 | <a name="output_cluster_security_group_id"></a> [cluster\_security\_group\_id](#output\_cluster\_security\_group\_id) | Cluster security group that was created by Amazon EKS for the cluster |
 | <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver IRSA role |
 | <a name="output_eks_cluster_certificate_authority_data"></a> [eks\_cluster\_certificate\_authority\_data](#output\_eks\_cluster\_certificate\_authority\_data) | Base64 encoded certificate data for the cluster |
@@ -230,6 +345,8 @@ stack_cluster_addons_overrides = {
 | <a name="output_eks_oidc_provider"></a> [eks\_oidc\_provider](#output\_eks\_oidc\_provider) | The OpenID Connect identity provider (issuer URL without leading `https://`) |
 | <a name="output_eks_oidc_provider_arn"></a> [eks\_oidc\_provider\_arn](#output\_eks\_oidc\_provider\_arn) | EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band |
 | <a name="output_external_dns_role_arn"></a> [external\_dns\_role\_arn](#output\_external\_dns\_role\_arn) | ARN of the External DNS IRSA role |
+| <a name="output_initial_node_labels_resolved"></a> [initial\_node\_labels\_resolved](#output\_initial\_node\_labels\_resolved) | Labels applied to the initial managed node group after resolving stack\_cni, initial\_node\_labels, and initial\_node\_labels\_extra |
+| <a name="output_initial_node_taints_resolved"></a> [initial\_node\_taints\_resolved](#output\_initial\_node\_taints\_resolved) | Taints applied to the initial managed node group after resolving stack\_cni, initial\_node\_taints, and initial\_node\_taints\_extra |
 | <a name="output_karpenter_node_iam_role_name"></a> [karpenter\_node\_iam\_role\_name](#output\_karpenter\_node\_iam\_role\_name) | The name of the Karpenter node IAM role |
 | <a name="output_karpenter_queue_name"></a> [karpenter\_queue\_name](#output\_karpenter\_queue\_name) | The name of the Karpenter SQS queue |
 | <a name="output_karpenter_role_arn"></a> [karpenter\_role\_arn](#output\_karpenter\_role\_arn) | ARN of the Karpenter IRSA role |

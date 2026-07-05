@@ -36,16 +36,26 @@ variable "stack_tags" {
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
 
+variable "stack_cni" {
+  type        = string
+  default     = "cilium"
+  description = "CNI profile driving the initial node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. Override individual pieces with initial_node_taints(_extra)/initial_node_labels(_extra) and the stack_enable_*_addon toggles."
+  validation {
+    condition     = contains(["cilium", "kube-ovn", "vpc-cni"], var.stack_cni)
+    error_message = "stack_cni must be one of: cilium, kube-ovn, vpc-cni."
+  }
+}
+
 variable "stack_enable_vpc_cni_addon" {
   type        = bool
-  default     = false
-  description = "Install AWS VPC CNI as a managed addon. Defaults to false so the cluster comes up CNI-less and consumers pick a CNI (Cilium, Kube-OVN, or vpc-cni). Set true to install vpc-cni as a managed addon. When false, nodeadm maxPods=110 cloudinit is applied automatically."
+  default     = null
+  description = "Override installation of the AWS VPC CNI managed addon. Leave null (default) to derive from stack_cni (on for vpc-cni, off for cilium/kube-ovn). Set true/false to force. When the addon is off, nodeadm maxPods=110 cloudinit is applied automatically."
 }
 
 variable "stack_enable_kube_proxy_addon" {
   type        = bool
-  default     = true
-  description = "Install kube-proxy as a managed addon. Set false when using Cilium with kube-proxy replacement enabled."
+  default     = null
+  description = "Override installation of the kube-proxy managed addon. Leave null (default) to derive from stack_cni (off for cilium kube-proxy replacement, on for kube-ovn/vpc-cni). Set true/false to force."
 }
 
 variable "stack_enable_coredns_addon" {
@@ -171,33 +181,42 @@ variable "stack_ro_arns" {
 }
 
 variable "initial_node_taints" {
-  type = map(object({ key = string, value = string, effect = string }))
-  default = {
-    criticalAddonsOnly = {
-      key    = "CriticalAddonsOnly"
-      value  = "true"
-      effect = "NO_SCHEDULE"
-    }
-    nidhogg = {
-      key    = "nidhogg.uswitch.com/kube-system.kube-multus-ds"
-      value  = "true"
-      effect = "NO_SCHEDULE"
-    }
-  }
-  description = "taints for the initial managed node group"
+  type        = map(object({ key = string, value = string, effect = string }))
+  default     = null
+  description = "Full override of the initial managed node group taints. Leave null (default) to derive from stack_cni merged with initial_node_taints_extra. Set to a map to replace the CNI preset entirely (use {} for no taints)."
+}
+
+variable "initial_node_taints_extra" {
+  type        = map(object({ key = string, value = string, effect = string }))
+  default     = {}
+  description = "Extra taints merged over the stack_cni preset for the initial managed node group (caller keys win). Ignored when initial_node_taints is set."
 }
 
 variable "initial_node_labels" {
-  type = map(string)
-  default = {
-    "kube-ovn/role" = "master"
-  }
-  description = "labels for the initial managed node group"
+  type        = map(string)
+  default     = null
+  description = "Full override of the initial managed node group labels. Leave null (default) to derive from stack_cni merged with initial_node_labels_extra. Set to a map to replace the CNI preset entirely (use {} for no labels)."
+}
+
+variable "initial_node_labels_extra" {
+  type        = map(string)
+  default     = {}
+  description = "Extra labels merged over the stack_cni preset for the initial managed node group (caller keys win). Ignored when initial_node_labels is set."
 }
 
 variable "initial_instance_types" {
   type        = list(string)
   description = "instance types of the initial managed node group"
+}
+
+variable "initial_node_timeouts" {
+  type = object({
+    create = optional(string)
+    update = optional(string)
+    delete = optional(string)
+  })
+  default     = null
+  description = "Timeouts for the initial managed node group's create/update/delete. null uses the AWS provider default (60m create). Set e.g. { create = \"20m\" } to fail fast when a CNI-less cluster's nodes never reach Ready."
 }
 
 variable "initial_node_min_size" {

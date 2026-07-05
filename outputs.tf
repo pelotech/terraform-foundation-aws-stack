@@ -40,6 +40,11 @@ output "eks_cluster_endpoint" {
   value       = module.eks.cluster_endpoint
 }
 
+output "cilium_k8s_service_host" {
+  description = "Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443."
+  value       = replace(module.eks.cluster_endpoint, "https://", "")
+}
+
 output "eks_cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for the cluster"
   value       = module.eks.cluster_certificate_authority_data
@@ -123,4 +128,22 @@ output "cert_manager_role_arn" {
 output "karpenter_role_arn" {
   description = "ARN of the Karpenter IRSA role"
   value       = try(module.karpenter[0].iam_role_arn, null)
+}
+
+################################################################################
+# CNI profile (resolved)
+################################################################################
+output "initial_node_taints_resolved" {
+  description = "Taints applied to the initial managed node group after resolving stack_cni, initial_node_taints, and initial_node_taints_extra"
+  value       = local.initial_taints
+}
+
+output "initial_node_labels_resolved" {
+  description = "Labels applied to the initial managed node group after resolving stack_cni, initial_node_labels, and initial_node_labels_extra"
+  value       = local.initial_labels
+}
+
+output "cluster_addons_enabled_resolved" {
+  description = "Managed addon enablement after resolving stack_cni and the stack_enable_*_addon overrides"
+  value       = local.cluster_addons_enabled
 }

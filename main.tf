@@ -67,9 +67,50 @@ locals {
       resolve_conflicts_on_update = "OVERWRITE"
     }
   }
+  # CNI profiles: stack_cni selects the taints/labels and vpc-cni/kube-proxy addon
+  # enablement appropriate for the chosen CNI. Individual pieces stay overridable
+  # (initial_node_taints(_extra)/initial_node_labels(_extra) and the addon toggles).
+  cni_profiles = {
+    cilium = {
+      taints = {
+        critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+        cilium               = { key = "node.cilium.io/agent-not-ready", value = "true", effect = "NO_EXECUTE" }
+      }
+      labels                  = {}
+      enable_vpc_cni_addon    = false
+      enable_kube_proxy_addon = false # cilium kube-proxy replacement
+    }
+    "kube-ovn" = {
+      taints = {
+        critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+        nidhogg              = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
+      }
+      labels                  = { "kube-ovn/role" = "master" }
+      enable_vpc_cni_addon    = false
+      enable_kube_proxy_addon = true
+    }
+    "vpc-cni" = {
+      taints = {
+        critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+      }
+      labels                  = {}
+      enable_vpc_cni_addon    = true
+      enable_kube_proxy_addon = true
+    }
+  }
+  cni = local.cni_profiles[var.stack_cni]
+
+  # Override model: full-override var wins entirely (null = derive); otherwise preset + _extra merge.
+  initial_taints = var.initial_node_taints != null ? var.initial_node_taints : merge(local.cni.taints, var.initial_node_taints_extra)
+  initial_labels = var.initial_node_labels != null ? var.initial_node_labels : merge(local.cni.labels, var.initial_node_labels_extra)
+
+  # Addon toggles: explicit bool wins; null = derive from CNI profile.
+  enable_vpc_cni_addon    = var.stack_enable_vpc_cni_addon != null ? var.stack_enable_vpc_cni_addon : local.cni.enable_vpc_cni_addon
+  enable_kube_proxy_addon = var.stack_enable_kube_proxy_addon != null ? var.stack_enable_kube_proxy_addon : local.cni.enable_kube_proxy_addon
+
   cluster_addons_enabled = {
-    "vpc-cni"    = var.stack_enable_vpc_cni_addon
-    "kube-proxy" = var.stack_enable_kube_proxy_addon
+    "vpc-cni"    = local.enable_vpc_cni_addon
+    "kube-proxy" = local.enable_kube_proxy_addon
     "coredns"    = var.stack_enable_coredns_addon
   }
   cluster_addons = {
@@ -227,8 +268,8 @@ module "eks" {
         http_put_response_hop_limit = 2
         http_tokens                 = "required"
       }
-      labels                  = var.initial_node_labels
-      cloudinit_pre_nodeadm   = var.stack_enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
+      labels                  = local.initial_labels
+      cloudinit_pre_nodeadm   = local.enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
       pre_bootstrap_user_data = var.pre_bootstrap_user_data
       block_device_mappings = {
         xvda = {
@@ -241,8 +282,9 @@ module "eks" {
           }
         }
       }
-      taints                       = var.initial_node_taints
+      taints                       = local.initial_taints
       iam_role_additional_policies = var.node_iam_additional_policies
+      timeouts                     = var.initial_node_timeouts
     }
   } : {}
   access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.extra_access_entries)
