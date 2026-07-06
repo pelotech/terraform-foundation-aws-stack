@@ -96,8 +96,8 @@ variable "wait_for_nodes_selector" {
 
 variable "wait_for_nodes_count" {
   type        = number
-  default     = 1
-  description = "Minimum number of registered nodes matching the selector before install proceeds."
+  default     = 3
+  description = "Minimum number of registered nodes matching the selector before install proceeds. Matches the default desired count"
 }
 
 variable "wait_for_nodes_timeout" {
