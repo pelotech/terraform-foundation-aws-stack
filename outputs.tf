@@ -45,6 +45,11 @@ output "cilium_k8s_service_host" {
   value       = replace(module.eks.cluster_endpoint, "https://", "")
 }
 
+output "eks_cluster_service_cidr" {
+  description = "The cluster's Kubernetes service CIDR (AWS-assigned or configured). Wire into the cni-bootstrap module's service_cidr for kube-ovn (ipv4.SVC_CIDR)."
+  value       = module.eks.cluster_service_cidr
+}
+
 output "eks_cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for the cluster"
   value       = module.eks.cluster_certificate_authority_data

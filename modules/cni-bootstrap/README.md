@@ -53,10 +53,25 @@ module "cni_bootstrap" {
 }
 ```
 
-> The kube-ovn chart default is a best-effort starting point and usually needs
-> value tuning for your topology — use `chart_version` / `helm_set` /
-> `helm_values`. It pairs with the `kube-ovn/role=master` node label set by
-> `stack_cni = "kube-ovn"` in the foundation module.
+### kube-ovn
+
+```hcl
+module "cni_bootstrap" {
+  source       = "github.com/pelotech/terraform-foundation-aws-stack//modules/cni-bootstrap"
+  cni          = "kube-ovn"
+  service_cidr = module.foundation.eks_cluster_service_cidr # -> ipv4.SVC_CIDR
+}
+```
+
+> Installs the OCI chart `oci://ghcr.io/uki-code/charts/kube-ovn` at `v1.13.9`
+> (release name `kube-ovn`, 15m/900s default timeout) with pinger/resource
+> defaults baked in. **`ipv4.SVC_CIDR` comes from `service_cidr`** — wire the
+> foundation `eks_cluster_service_cidr` output so it matches the cluster's actual
+> service CIDR (set `service_cidr = ""` to omit it). Pairs with the
+> `kube-ovn/role=master` node label from `stack_cni = "kube-ovn"`. `helm`'s
+> `--force-conflicts` (used on in-place kube-ovn upgrades) has no Terraform
+> provider equivalent; it's a no-op on the initial bootstrap install this module
+> targets.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -95,7 +110,8 @@ No modules.
 | <a name="input_k8s_service_host"></a> [k8s\_service\_host](#input\_k8s\_service\_host) | API server host (no scheme) for Cilium kube-proxy replacement bootstrap. Wire from the foundation module's cilium\_k8s\_service\_host output. Ignored unless cni=cilium and kube\_proxy\_replacement=true. | `string` | `""` | no |
 | <a name="input_kube_proxy_replacement"></a> [kube\_proxy\_replacement](#input\_kube\_proxy\_replacement) | Enable Cilium kube-proxy replacement (cni=cilium only). When true, k8sServiceHost/k8sServicePort are set from k8s\_service\_host. | `bool` | `true` | no |
 | <a name="input_namespace"></a> [namespace](#input\_namespace) | Namespace to install the CNI release into. | `string` | `"kube-system"` | no |
-| <a name="input_wait_timeout"></a> [wait\_timeout](#input\_wait\_timeout) | Seconds to wait for the Helm release to become ready. | `number` | `600` | no |
+| <a name="input_service_cidr"></a> [service\_cidr](#input\_service\_cidr) | Kubernetes service CIDR for kube-ovn (ipv4.SVC\_CIDR). Wire from the foundation module's eks\_cluster\_service\_cidr output so it matches the cluster. Empty string omits the set value. Ignored for cilium/custom. | `string` | `"10.100.0.0/16"` | no |
+| <a name="input_wait_timeout"></a> [wait\_timeout](#input\_wait\_timeout) | Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 2700s/45m). | `number` | `null` | no |
 
 ## Outputs
 

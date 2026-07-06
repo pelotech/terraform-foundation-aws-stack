@@ -61,8 +61,44 @@ run "kube_ovn_defaults" {
   }
 
   assert {
-    condition     = helm_release.cni[0].chart == "kube-ovn" && helm_release.cni[0].repository == "https://kubeovn.github.io/kube-ovn/"
-    error_message = "kube-ovn must resolve to the kube-ovn chart/repo"
+    condition     = helm_release.cni[0].name == "kube-ovn" && helm_release.cni[0].chart == "kube-ovn" && helm_release.cni[0].repository == "oci://ghcr.io/uki-code/charts" && helm_release.cni[0].version == "v1.13.9"
+    error_message = "kube-ovn must resolve to the OCI uki-code kube-ovn chart at v1.13.9"
+  }
+  assert {
+    condition     = helm_release.cni[0].timeout == 900
+    error_message = "kube-ovn must default to the 15m (900s) timeout"
+  }
+  assert {
+    condition     = anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR" && s.value == "10.100.0.0/16"])
+    error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr (default 10.100.0.0/16)"
+  }
+}
+
+run "kube_ovn_service_cidr_override" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn"
+    service_cidr = "172.20.0.0/16"
+  }
+
+  assert {
+    condition     = anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR" && s.value == "172.20.0.0/16"])
+    error_message = "service_cidr must drive ipv4.SVC_CIDR"
+  }
+}
+
+run "kube_ovn_empty_service_cidr_omits_set" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn"
+    service_cidr = ""
+  }
+
+  assert {
+    condition     = !anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR"])
+    error_message = "empty service_cidr must omit the ipv4.SVC_CIDR set value"
   }
 }
 

@@ -26,6 +26,12 @@ variable "k8s_service_host" {
   description = "API server host (no scheme) for Cilium kube-proxy replacement bootstrap. Wire from the foundation module's cilium_k8s_service_host output. Ignored unless cni=cilium and kube_proxy_replacement=true."
 }
 
+variable "service_cidr" {
+  type        = string
+  default     = "10.100.0.0/16"
+  description = "Kubernetes service CIDR for kube-ovn (ipv4.SVC_CIDR). Wire from the foundation module's eks_cluster_service_cidr output so it matches the cluster. Empty string omits the set value. Ignored for cilium/custom."
+}
+
 variable "kube_proxy_replacement" {
   type        = bool
   default     = true
@@ -52,8 +58,8 @@ variable "helm_values" {
 
 variable "wait_timeout" {
   type        = number
-  default     = 600
-  description = "Seconds to wait for the Helm release to become ready."
+  default     = null
+  description = "Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 2700s/45m)."
 }
 
 variable "custom_chart" {
