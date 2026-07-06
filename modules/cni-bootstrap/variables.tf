@@ -20,6 +20,26 @@ variable "namespace" {
   description = "Namespace to install the CNI release into."
 }
 
+variable "cluster_name" {
+  type        = string
+  default     = ""
+  description = "EKS cluster name (from the foundation eks_cluster_name output). Required when wait_for_nodes is enabled (kube-ovn default) so the node-registration poll can reach the cluster."
+  validation {
+    condition     = !(var.wait_for_nodes == null ? var.cni == "kube-ovn" : var.wait_for_nodes) || var.cluster_name != ""
+    error_message = "cluster_name is required when waiting for node registration (default for kube-ovn). Wire module.foundation.eks_cluster_name."
+  }
+}
+
+variable "region" {
+  type        = string
+  default     = ""
+  description = "AWS region of the cluster (from the foundation region output). Required when wait_for_nodes is enabled — the same cluster name can exist in multiple regions, so the poll must region-qualify it."
+  validation {
+    condition     = !(var.wait_for_nodes == null ? var.cni == "kube-ovn" : var.wait_for_nodes) || var.region != ""
+    error_message = "region is required when waiting for node registration (default for kube-ovn). Wire module.foundation.region."
+  }
+}
+
 variable "k8s_service_host" {
   type        = string
   default     = ""
@@ -60,6 +80,30 @@ variable "wait_timeout" {
   type        = number
   default     = null
   description = "Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 2700s/45m)."
+}
+
+variable "wait_for_nodes" {
+  type        = bool
+  default     = null
+  description = "Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster_name + region."
+}
+
+variable "wait_for_nodes_selector" {
+  type        = string
+  default     = null
+  description = "Label selector the node-registration poll waits on. null derives per-CNI (kube-ovn \"kube-ovn/role=master\"; otherwise empty = any node)."
+}
+
+variable "wait_for_nodes_count" {
+  type        = number
+  default     = 1
+  description = "Minimum number of registered nodes matching the selector before install proceeds."
+}
+
+variable "wait_for_nodes_timeout" {
+  type        = number
+  default     = 600
+  description = "Seconds the node-registration poll waits before failing."
 }
 
 variable "custom_chart" {

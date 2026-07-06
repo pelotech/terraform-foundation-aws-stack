@@ -50,6 +50,11 @@ output "eks_cluster_service_cidr" {
   value       = module.eks.cluster_service_cidr
 }
 
+output "region" {
+  description = "The AWS region the stack is deployed in. Wire into the cni-bootstrap module's region so its node-registration poll can region-qualify the cluster."
+  value       = data.aws_region.current.region
+}
+
 output "eks_cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for the cluster"
   value       = module.eks.cluster_certificate_authority_data

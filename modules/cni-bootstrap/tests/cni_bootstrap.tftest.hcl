@@ -15,6 +15,10 @@ run "cilium_defaults" {
     error_message = "cilium must resolve to the cilium chart at the default version"
   }
   assert {
+    condition     = length(terraform_data.wait_nodes) == 0
+    error_message = "cilium must install concurrently (no node-registration gate)"
+  }
+  assert {
     condition     = anytrue([for s in output.resolved_set : s.name == "kubeProxyReplacement" && s.value == "true"])
     error_message = "cilium must enable kubeProxyReplacement by default"
   }
@@ -57,7 +61,9 @@ run "kube_ovn_defaults" {
   command = plan
 
   variables {
-    cni = "kube-ovn"
+    cni          = "kube-ovn"
+    cluster_name = "test"
+    region       = "us-west-2"
   }
 
   assert {
@@ -72,6 +78,10 @@ run "kube_ovn_defaults" {
     condition     = anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR" && s.value == "10.100.0.0/16"])
     error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr (default 10.100.0.0/16)"
   }
+  assert {
+    condition     = length(terraform_data.wait_nodes) == 1
+    error_message = "kube-ovn must gate the install on node registration"
+  }
 }
 
 run "kube_ovn_service_cidr_override" {
@@ -79,6 +89,8 @@ run "kube_ovn_service_cidr_override" {
 
   variables {
     cni          = "kube-ovn"
+    cluster_name = "test"
+    region       = "us-west-2"
     service_cidr = "172.20.0.0/16"
   }
 
@@ -93,12 +105,74 @@ run "kube_ovn_empty_service_cidr_omits_set" {
 
   variables {
     cni          = "kube-ovn"
+    cluster_name = "test"
+    region       = "us-west-2"
     service_cidr = ""
   }
 
   assert {
     condition     = !anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR"])
     error_message = "empty service_cidr must omit the ipv4.SVC_CIDR set value"
+  }
+}
+
+run "kube_ovn_requires_cluster_name" {
+  command = plan
+
+  variables {
+    cni    = "kube-ovn"
+    region = "us-west-2"
+  }
+
+  expect_failures = [var.cluster_name]
+}
+
+run "kube_ovn_requires_region" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn"
+    cluster_name = "test"
+  }
+
+  expect_failures = [var.region]
+}
+
+run "kube_ovn_wait_disabled" {
+  command = plan
+
+  variables {
+    cni            = "kube-ovn"
+    cluster_name   = "test"
+    region         = "us-west-2"
+    wait_for_nodes = false
+  }
+
+  assert {
+    condition     = length(terraform_data.wait_nodes) == 0
+    error_message = "wait_for_nodes=false must disable the node-registration gate"
+  }
+}
+
+run "custom_can_opt_into_poll" {
+  command = plan
+
+  variables {
+    cni                     = "custom"
+    cluster_name            = "test"
+    region                  = "us-west-2"
+    wait_for_nodes          = true
+    wait_for_nodes_selector = "node-role.kubernetes.io/cni=true"
+    custom_chart = {
+      repository = "https://example.com/charts"
+      chart      = "my-cni"
+      version    = "0.1.0"
+    }
+  }
+
+  assert {
+    condition     = length(terraform_data.wait_nodes) == 1
+    error_message = "a custom CNI must be able to opt into the node-registration gate"
   }
 }
 

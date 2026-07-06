@@ -213,8 +213,10 @@ module "cni_bootstrap" {
 }
 ```
 
-For `cni = "kube-ovn"`, wire `service_cidr = module.foundation.eks_cluster_service_cidr`
-so kube-ovn's `ipv4.SVC_CIDR` matches the cluster's actual service CIDR.
+For `cni = "kube-ovn"`, also wire `service_cidr = module.foundation.eks_cluster_service_cidr`
+(so `ipv4.SVC_CIDR` matches the cluster), plus `cluster_name = module.foundation.eks_cluster_name`
+and `region = module.foundation.region` — kube-ovn polls for its master node to
+register before installing (needs `aws`+`kubectl` on the apply host).
 `cni = "custom"` installs any Helm-packaged CNI via `custom_chart`; layer extra
 values with `helm_set` / `helm_values`. See `modules/cni-bootstrap/README.md`.
 As a safety net, set `initial_node_timeouts = { create = "20m" }` so a failed
@@ -356,6 +358,7 @@ stack_cluster_addons_overrides = {
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | The Amazon Resource Name (ARN) of the KMS key |
 | <a name="output_load_balancer_controller_role_arn"></a> [load\_balancer\_controller\_role\_arn](#output\_load\_balancer\_controller\_role\_arn) | ARN of the ALB controller IRSA role |
 | <a name="output_node_security_group_id"></a> [node\_security\_group\_id](#output\_node\_security\_group\_id) | ID of the node shared security group |
+| <a name="output_region"></a> [region](#output\_region) | The AWS region the stack is deployed in. Wire into the cni-bootstrap module's region so its node-registration poll can region-qualify the cluster. |
 | <a name="output_s3_csi_driver_role_arn"></a> [s3\_csi\_driver\_role\_arn](#output\_s3\_csi\_driver\_role\_arn) | ARN of the S3 CSI driver IRSA role |
 | <a name="output_vpc"></a> [vpc](#output\_vpc) | The vpc object when it's created |
 <!-- END_TF_DOCS -->

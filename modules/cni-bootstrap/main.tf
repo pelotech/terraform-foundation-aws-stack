@@ -4,11 +4,13 @@ locals {
   # `timeout` is the per-CNI wait default (overridden by var.wait_timeout).
   cni_defaults = {
     cilium = {
-      release_name = "cilium"
-      repository   = "https://helm.cilium.io/"
-      chart        = "cilium"
-      version      = "1.15.6"
-      timeout      = 600
+      release_name  = "cilium"
+      repository    = "https://helm.cilium.io/"
+      chart         = "cilium"
+      version       = "1.15.6"
+      timeout       = 600
+      wait_default  = false # agent bootstraps NotReady nodes; install concurrently
+      wait_selector = ""
       set = concat(
         [{ name = "kubeProxyReplacement", value = tostring(var.kube_proxy_replacement) }],
         var.kube_proxy_replacement && var.k8s_service_host != "" ? [
@@ -27,10 +29,12 @@ locals {
       # must match the cluster service CIDR — set from var.service_cidr (wire the
       # foundation eks_cluster_service_cidr output). Pairs with the
       # kube-ovn/role=master node label set by stack_cni="kube-ovn".
-      repository = "oci://ghcr.io/uki-code/charts"
-      chart      = "kube-ovn"
-      version    = "v1.13.9"
-      timeout    = 900 # 15m
+      repository    = "oci://ghcr.io/uki-code/charts"
+      chart         = "kube-ovn"
+      version       = "v1.13.9"
+      timeout       = 900  # 15m
+      wait_default  = true # must read node IPs / schedule on the master node first
+      wait_selector = "kube-ovn/role=master"
       set = concat(
         var.service_cidr != "" ? [{ name = "ipv4.SVC_CIDR", value = var.service_cidr }] : [],
         [
@@ -47,18 +51,42 @@ locals {
       )
     }
     custom = {
-      release_name = try(var.custom_chart.chart, null)
-      repository   = try(var.custom_chart.repository, null)
-      chart        = try(var.custom_chart.chart, null)
-      version      = try(var.custom_chart.version, null)
-      timeout      = 600
-      set          = []
+      release_name  = try(var.custom_chart.chart, null)
+      repository    = try(var.custom_chart.repository, null)
+      chart         = try(var.custom_chart.chart, null)
+      version       = try(var.custom_chart.version, null)
+      timeout       = 600
+      wait_default  = false # opt into the poll via wait_for_nodes = true
+      wait_selector = ""
+      set           = []
     }
   }
 
   selected = local.cni_defaults[var.cni]
   set      = concat(local.selected.set, var.helm_set)
   timeout  = coalesce(var.wait_timeout, local.selected.timeout)
+
+  wait_for_nodes = var.wait_for_nodes != null ? var.wait_for_nodes : local.selected.wait_default
+  node_selector  = var.wait_for_nodes_selector != null ? var.wait_for_nodes_selector : local.selected.wait_selector
+}
+
+# Optional gate: wait for nodes to register before installing (kube-ovn needs the
+# master node present to read IPs / schedule its control plane). Depends only on
+# the cluster inputs, never the node group, so it runs concurrently with node-group
+# creation and avoids the managed-node-group readiness deadlock.
+resource "terraform_data" "wait_nodes" {
+  count = var.create && local.wait_for_nodes ? 1 : 0
+
+  provisioner "local-exec" {
+    command = "bash ${path.module}/scripts/wait-for-nodes.sh"
+    environment = {
+      CLUSTER_NAME = var.cluster_name
+      REGION       = var.region
+      SELECTOR     = local.node_selector
+      COUNT        = tostring(var.wait_for_nodes_count)
+      TIMEOUT      = tostring(var.wait_for_nodes_timeout)
+    }
+  }
 }
 
 resource "helm_release" "cni" {
@@ -73,4 +101,6 @@ resource "helm_release" "cni" {
 
   set    = local.set
   values = var.helm_values
+
+  depends_on = [terraform_data.wait_nodes]
 }
