@@ -29,7 +29,7 @@ locals {
       # must match the cluster service CIDR — set from var.service_cidr (wire the
       # foundation eks_cluster_service_cidr output). Pairs with the
       # kube-ovn/role=master node label set by stack_cni="kube-ovn".
-      repository    = "oci://ghcr.io/uki-code/charts"
+      repository    = "oci://ghcr.io/pelotech/charts"
       chart         = "kube-ovn"
       version       = "v1.13.9"
       timeout       = 900  # 15m
