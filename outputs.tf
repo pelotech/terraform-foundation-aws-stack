@@ -55,6 +55,11 @@ output "region" {
   value       = data.aws_region.current.region
 }
 
+output "vpc_endpoint_ids" {
+  description = "Map of created VPC endpoint ids (empty when stack_enable_vpc_endpoints is false)."
+  value       = try(module.vpc_endpoints[0].endpoints, {})
+}
+
 output "eks_cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for the cluster"
   value       = module.eks.cluster_certificate_authority_data

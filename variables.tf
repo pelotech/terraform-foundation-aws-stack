@@ -266,8 +266,18 @@ variable "s3_csi_driver_bucket_arns" {
 }
 
 variable "vpc_endpoints" {
-  type        = list(string)
-  description = "vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC"
+  type = list(string)
+  # VPC endpoint service short-names to create (empty = none). "s3" and "dynamodb"
+  # are provisioned as free Gateway endpoints; every other name is an Interface
+  # endpoint. Each is opt-in, so e.g. ["s3"] creates only the S3 gateway. Interface
+  # endpoints let private nodes reach ECR/STS/SSM/EC2 and be SSM-debuggable without
+  # NAT egress (kubelet->API already works privately via the cluster's
+  # endpoint_private_access ENIs). Internal (module-created) VPC only.
+  # Cost: Gateway endpoints (s3/dynamodb) are free; Interface endpoints are ~$7/mo
+  # each per AZ (≈ $22/mo per service across 3 AZs) plus data processing.
+  # Recommended set for private/NAT-resilient clusters:
+  # ["s3","ssm","ssmmessages","ec2messages","ec2","ecr.api","ecr.dkr","sts","elasticloadbalancing","autoscaling"]
+  description = "VPC endpoint service short-names to create (empty = none). s3/dynamodb are free Gateway endpoints; others are Interface endpoints. See the variable comment for the recommended set and cost. Internal VPC only."
   default     = []
 }
 

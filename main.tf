@@ -226,12 +226,51 @@ module "fck_nat" {
 
 data "aws_region" "current" {}
 
+# Private VPC endpoints so nodes reach ECR/STS/SSM/EC2 (and are SSM-debuggable)
+# without depending on NAT egress. Kubelet->API already works privately via the
+# cluster's endpoint_private_access ENIs. Opt-in by listing services in
+# var.vpc_endpoints (empty = none). Internal (module-created) VPC only.
 # https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/using-govcloud-vpc-endpoints.html
-resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
-  for_each     = var.stack_existing_vpc_config == null ? toset(var.vpc_endpoints) : []
-  vpc_id       = module.vpc.vpc_id
-  service_name = "com.amazonaws.${data.aws_region.current.region}.${each.value}"
-  tags         = var.stack_tags
+module "vpc_endpoints" {
+  source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
+  version = "6.6.1"
+  count   = var.stack_existing_vpc_config == null && length(var.vpc_endpoints) > 0 ? 1 : 0
+
+  vpc_id = module.vpc.vpc_id
+
+  create_security_group      = true
+  security_group_name_prefix = "${var.stack_name}-vpce-"
+  security_group_rules = {
+    https_from_vpc = {
+      type        = "ingress"
+      protocol    = "tcp"
+      from_port   = 443
+      to_port     = 443
+      cidr_blocks = [module.vpc.vpc_cidr_block]
+    }
+  }
+
+  # s3/dynamodb are free Gateway endpoints (routed via the private route tables);
+  # everything else is an Interface endpoint. Each service is opt-in via the list,
+  # so e.g. vpc_endpoints = ["s3"] provisions only the S3 gateway.
+  endpoints = merge(
+    {
+      for s in var.vpc_endpoints : replace(s, ".", "_") => {
+        service         = s
+        service_type    = "Gateway"
+        route_table_ids = module.vpc.private_route_table_ids
+      } if contains(["s3", "dynamodb"], s)
+    },
+    {
+      for s in var.vpc_endpoints : replace(s, ".", "_") => {
+        service             = s
+        private_dns_enabled = true
+        subnet_ids          = module.vpc.private_subnets
+      } if !contains(["s3", "dynamodb"], s)
+    },
+  )
+
+  tags = var.stack_tags
 }
 
 module "eks" {

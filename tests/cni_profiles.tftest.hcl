@@ -148,3 +148,38 @@ run "addon_toggle_override_wins" {
     error_message = "explicit stack_enable_kube_proxy_addon must override the cilium-derived default"
   }
 }
+
+run "vpc_endpoints_disabled_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(module.vpc_endpoints) == 0
+    error_message = "VPC endpoints must be off by default (vpc_endpoints is empty)"
+  }
+}
+
+run "vpc_endpoints_enabled_when_listed" {
+  command = plan
+
+  variables {
+    vpc_endpoints = ["ssm", "ecr.api"]
+  }
+
+  assert {
+    condition     = length(module.vpc_endpoints) == 1
+    error_message = "a non-empty vpc_endpoints must create the vpc_endpoints module"
+  }
+}
+
+run "vpc_endpoints_s3_only" {
+  command = plan
+
+  variables {
+    vpc_endpoints = ["s3"]
+  }
+
+  assert {
+    condition     = length(module.vpc_endpoints) == 1 && length(module.vpc_endpoints[0].endpoints) == 1 && contains(keys(module.vpc_endpoints[0].endpoints), "s3")
+    error_message = "listing only s3 must create just the S3 (gateway) endpoint and nothing else"
+  }
+}

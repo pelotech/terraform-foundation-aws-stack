@@ -245,6 +245,30 @@ stack_cluster_addons_overrides = {
 }
 ```
 
+## Private VPC endpoints
+
+Populate `vpc_endpoints` with endpoint service short-names to provision private
+VPC endpoints in the module-created VPC; empty (the default) creates none.
+`s3`/`dynamodb` become **free Gateway** endpoints and every other name becomes an
+**Interface** endpoint. Each is opt-in — e.g. `vpc_endpoints = ["s3"]` provisions
+only the S3 gateway.
+
+This lets private-subnet nodes reach ECR/STS/SSM/EC2 — so they can bootstrap and be
+**SSM-debuggable even when NAT egress is down or still provisioning** (kubelet→API
+already works privately via the cluster's `endpoint_private_access` ENIs). It also
+enables a NAT-less private topology.
+
+Recommended set for private/NAT-resilient clusters:
+
+```hcl
+vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "ecr.dkr", "sts", "elasticloadbalancing", "autoscaling"]
+```
+
+> Gateway endpoints (`s3`/`dynamodb`) are free; Interface endpoints cost ~$7/mo per
+> endpoint **per AZ** (≈ $22/mo per service across 3 AZs) plus data processing —
+> hence opt-in. Applies only to the
+> module-created VPC; with `stack_existing_vpc_config` you manage endpoints yourself.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -273,13 +297,13 @@ stack_cluster_addons_overrides = {
 | <a name="module_s3_csi"></a> [s3\_csi](#module\_s3\_csi) | terraform-aws-modules/s3-bucket/aws | 5.14.1 |
 | <a name="module_s3_driver_irsa_role"></a> [s3\_driver\_irsa\_role](#module\_s3\_driver\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts | 6.6.1 |
 | <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 6.6.1 |
+| <a name="module_vpc_endpoints"></a> [vpc\_endpoints](#module\_vpc\_endpoints) | terraform-aws-modules/vpc/aws//modules/vpc-endpoints | 6.6.1 |
 
 ## Resources
 
 | Name | Type |
 | ---- | ---- |
 | [aws_eip.main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip) | resource |
-| [aws_vpc_endpoint.eks_vpc_endpoints](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint) | resource |
 | [aws_ami.main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_policy_document.source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
@@ -328,7 +352,7 @@ stack_cluster_addons_overrides = {
 | <a name="input_stack_ro_arns"></a> [stack\_ro\_arns](#input\_stack\_ro\_arns) | arn to the roles for the cluster read only role, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries | `list(string)` | `[]` | no |
 | <a name="input_stack_tags"></a> [stack\_tags](#input\_stack\_tags) | tags to be added to the stack, should at least have Owner and Environment | `map(string)` | <pre>{<br/>  "Environment": "prod",<br/>  "Owner": "pelotech"<br/>}</pre> | no |
 | <a name="input_stack_vpc_block"></a> [stack\_vpc\_block](#input\_stack\_vpc\_block) | Variables for defining the vpc for the stack | <pre>object({<br/>    cidr             = string<br/>    azs              = list(string)<br/>    private_subnets  = list(string)<br/>    public_subnets   = list(string)<br/>    database_subnets = list(string)<br/>  })</pre> | <pre>{<br/>  "azs": [<br/>    "us-west-2a",<br/>    "us-west-2b",<br/>    "us-west-2c"<br/>  ],<br/>  "cidr": "172.16.0.0/16",<br/>  "database_subnets": [<br/>    "172.16.200.0/24",<br/>    "172.16.201.0/24",<br/>    "172.16.202.0/24"<br/>  ],<br/>  "private_subnets": [<br/>    "172.16.0.0/24",<br/>    "172.16.1.0/24",<br/>    "172.16.2.0/24"<br/>  ],<br/>  "public_subnets": [<br/>    "172.16.100.0/24",<br/>    "172.16.101.0/24",<br/>    "172.16.102.0/24"<br/>  ]<br/>}</pre> | no |
-| <a name="input_vpc_endpoints"></a> [vpc\_endpoints](#input\_vpc\_endpoints) | vpc endpoints within the cluster vpc network, note: this only works when using the internal created VPC | `list(string)` | `[]` | no |
+| <a name="input_vpc_endpoints"></a> [vpc\_endpoints](#input\_vpc\_endpoints) | VPC endpoint service short-names to create (empty = none). s3/dynamodb are free Gateway endpoints; others are Interface endpoints. See the variable comment for the recommended set and cost. Internal VPC only. | `list(string)` | `[]` | no |
 
 ## Outputs
 
@@ -361,4 +385,5 @@ stack_cluster_addons_overrides = {
 | <a name="output_region"></a> [region](#output\_region) | The AWS region the stack is deployed in. Wire into the cni-bootstrap module's region so its node-registration poll can region-qualify the cluster. |
 | <a name="output_s3_csi_driver_role_arn"></a> [s3\_csi\_driver\_role\_arn](#output\_s3\_csi\_driver\_role\_arn) | ARN of the S3 CSI driver IRSA role |
 | <a name="output_vpc"></a> [vpc](#output\_vpc) | The vpc object when it's created |
+| <a name="output_vpc_endpoint_ids"></a> [vpc\_endpoint\_ids](#output\_vpc\_endpoint\_ids) | Map of created VPC endpoint ids (empty when stack\_enable\_vpc\_endpoints is false). |
 <!-- END_TF_DOCS -->
