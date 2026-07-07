@@ -70,6 +70,13 @@ locals {
       preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
+      configuration_values = jsonencode({
+        tolerations = [
+          {
+            operator = "Exists"
+          }
+        ]
+      })
     }
   }
   # CNI profiles: stack_cni selects the taints/labels and vpc-cni/kube-proxy addon
