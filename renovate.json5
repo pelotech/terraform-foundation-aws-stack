@@ -9,6 +9,22 @@
   gitIgnoredAuthors: [
     '245757523+pt-release-please[bot]@users.noreply.github.com',
   ],
+  // The cni-bootstrap module pins CNI Helm chart versions as string literals in
+  // locals, which Renovate's terraform manager does not parse. This custom
+  // manager reads `# renovate: datasource=... depName=... [registryUrl=...]`
+  // marker comments placed directly above each `version = "..."` line.
+  customManagers: [
+    {
+      customType: 'regex',
+      fileMatch: [
+        '^modules/cni-bootstrap/main\\.tf$',
+      ],
+      matchStrings: [
+        '#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+registryUrl=(?<registryUrl>\\S+))?[^\\n]*\\n\\s*version\\s*=\\s*"(?<currentValue>[^"]+)"',
+      ],
+      versioningTemplate: 'semver',
+    },
+  ],
   packageRules: [
     {
       description: 'Group terraform-aws-modules IAM updates together',

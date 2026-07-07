@@ -11,6 +11,11 @@ check "initial_node_group_sizing" {
 locals {
   permissions_boundary_arn = var.permissions_boundary != "" ? "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}" : null
   is_arm                   = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_pelotech_nat_instance_type))
+  # Derive the node AMI arch from the requested instance types (Graviton family
+  # names carry a "g", e.g. m7g/c6gd/t4g). Same detection as is_arm above; the
+  # a1 family (no "g") is not detected. initial_instance_types validates arch
+  # agreement, so index [0] is representative.
+  initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_instance_types[0]))
   admin_access_entries = {
     for index, item in var.stack_admin_arns : "admin_${index}" => {
       principal_arn = item
@@ -225,7 +230,7 @@ data "aws_region" "current" {}
 resource "aws_vpc_endpoint" "eks_vpc_endpoints" {
   for_each     = var.stack_existing_vpc_config == null ? toset(var.vpc_endpoints) : []
   vpc_id       = module.vpc.vpc_id
-  service_name = "com.amazonaws.${data.aws_region.current.name}.${each.value}"
+  service_name = "com.amazonaws.${data.aws_region.current.region}.${each.value}"
   tags         = var.stack_tags
 }
 
@@ -259,7 +264,7 @@ module "eks" {
       min_size                       = var.initial_node_min_size
       max_size                       = var.initial_node_max_size
       desired_size                   = var.initial_node_desired_size
-      ami_type                       = "AL2023_x86_64_STANDARD"
+      ami_type                       = local.initial_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
       capacity_type                  = "ON_DEMAND"
       enable_monitoring              = true  # TODO: change from default with upgrade - research impact
       use_latest_ami_release_version = false # TODO: change from default with upgrade - research impact

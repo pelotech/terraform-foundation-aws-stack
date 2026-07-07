@@ -144,16 +144,16 @@ output "karpenter_role_arn" {
 # CNI profile (resolved)
 ################################################################################
 output "initial_node_taints_resolved" {
-  description = "Taints applied to the initial managed node group after resolving stack_cni, initial_node_taints, and initial_node_taints_extra"
+  description = "(introspection) Taints applied to the initial managed node group after resolving stack_cni, initial_node_taints, and initial_node_taints_extra"
   value       = local.initial_taints
 }
 
 output "initial_node_labels_resolved" {
-  description = "Labels applied to the initial managed node group after resolving stack_cni, initial_node_labels, and initial_node_labels_extra"
+  description = "(introspection) Labels applied to the initial managed node group after resolving stack_cni, initial_node_labels, and initial_node_labels_extra"
   value       = local.initial_labels
 }
 
 output "cluster_addons_enabled_resolved" {
-  description = "Managed addon enablement after resolving stack_cni and the stack_enable_*_addon overrides"
+  description = "(introspection) Managed addon enablement after resolving stack_cni and the stack_enable_*_addon overrides"
   value       = local.cluster_addons_enabled
 }

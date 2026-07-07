@@ -64,11 +64,12 @@ run "kube_ovn_defaults" {
     cni          = "kube-ovn"
     cluster_name = "test"
     region       = "us-west-2"
+    service_cidr = "10.100.0.0/16"
   }
 
   assert {
-    condition     = helm_release.cni[0].name == "kube-ovn" && helm_release.cni[0].chart == "kube-ovn" && helm_release.cni[0].repository == "oci://ghcr.io/uki-code/charts" && helm_release.cni[0].version == "v1.13.9"
-    error_message = "kube-ovn must resolve to the OCI uki-code kube-ovn chart at v1.13.9"
+    condition     = helm_release.cni[0].name == "kube-ovn" && helm_release.cni[0].chart == "kube-ovn" && helm_release.cni[0].repository == "oci://ghcr.io/pelotech/charts" && helm_release.cni[0].version == "v1.13.9"
+    error_message = "kube-ovn must resolve to the OCI pelotech kube-ovn chart at v1.13.9"
   }
   assert {
     condition     = helm_release.cni[0].timeout == 900
@@ -76,7 +77,7 @@ run "kube_ovn_defaults" {
   }
   assert {
     condition     = anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR" && s.value == "10.100.0.0/16"])
-    error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr (default 10.100.0.0/16)"
+    error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr"
   }
   assert {
     condition     = length(terraform_data.wait_nodes) == 1
@@ -100,7 +101,7 @@ run "kube_ovn_service_cidr_override" {
   }
 }
 
-run "kube_ovn_empty_service_cidr_omits_set" {
+run "kube_ovn_requires_service_cidr" {
   command = plan
 
   variables {
@@ -110,18 +111,16 @@ run "kube_ovn_empty_service_cidr_omits_set" {
     service_cidr = ""
   }
 
-  assert {
-    condition     = !anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR"])
-    error_message = "empty service_cidr must omit the ipv4.SVC_CIDR set value"
-  }
+  expect_failures = [var.service_cidr]
 }
 
 run "kube_ovn_requires_cluster_name" {
   command = plan
 
   variables {
-    cni    = "kube-ovn"
-    region = "us-west-2"
+    cni          = "kube-ovn"
+    region       = "us-west-2"
+    service_cidr = "10.100.0.0/16"
   }
 
   expect_failures = [var.cluster_name]
@@ -133,6 +132,7 @@ run "kube_ovn_requires_region" {
   variables {
     cni          = "kube-ovn"
     cluster_name = "test"
+    service_cidr = "10.100.0.0/16"
   }
 
   expect_failures = [var.region]
@@ -145,6 +145,7 @@ run "kube_ovn_wait_disabled" {
     cni            = "kube-ovn"
     cluster_name   = "test"
     region         = "us-west-2"
+    service_cidr   = "10.100.0.0/16"
     wait_for_nodes = false
   }
 

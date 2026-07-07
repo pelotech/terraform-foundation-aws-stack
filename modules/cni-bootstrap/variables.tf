@@ -24,6 +24,9 @@ variable "cluster_name" {
   type        = string
   default     = ""
   description = "EKS cluster name (from the foundation eks_cluster_name output). Required when wait_for_nodes is enabled (kube-ovn default) so the node-registration poll can reach the cluster."
+  # NOTE: cluster_name and region repeat this "is waiting effectively on?" check
+  # (`wait_for_nodes ?? cni == kube-ovn`). Variable validation can't reference the
+  # local that computes it, so the expression is duplicated here and in `region`.
   validation {
     condition     = !(var.wait_for_nodes == null ? var.cni == "kube-ovn" : var.wait_for_nodes) || var.cluster_name != ""
     error_message = "cluster_name is required when waiting for node registration (default for kube-ovn). Wire module.foundation.eks_cluster_name."
@@ -48,8 +51,12 @@ variable "k8s_service_host" {
 
 variable "service_cidr" {
   type        = string
-  default     = "10.100.0.0/16"
-  description = "Kubernetes service CIDR for kube-ovn (ipv4.SVC_CIDR). Wire from the foundation module's eks_cluster_service_cidr output so it matches the cluster. Empty string omits the set value. Ignored for cilium/custom."
+  default     = ""
+  description = "Kubernetes service CIDR for kube-ovn (ipv4.SVC_CIDR). Required for kube-ovn — wire from the foundation module's eks_cluster_service_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom."
+  validation {
+    condition     = var.cni != "kube-ovn" || var.service_cidr != ""
+    error_message = "service_cidr is required for kube-ovn. Wire module.foundation.eks_cluster_service_cidr."
+  }
 }
 
 variable "kube_proxy_replacement" {
@@ -79,7 +86,7 @@ variable "helm_values" {
 variable "wait_timeout" {
   type        = number
   default     = null
-  description = "Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 2700s/45m)."
+  description = "Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 900s/15m)."
 }
 
 variable "wait_for_nodes" {
@@ -97,7 +104,7 @@ variable "wait_for_nodes_selector" {
 variable "wait_for_nodes_count" {
   type        = number
   default     = 3
-  description = "Minimum number of registered nodes matching the selector before install proceeds. Matches the default desired count"
+  description = "Minimum number of registered nodes matching the selector before install proceeds. Default 3 matches the foundation initial_node_desired_size default; set this to your actual master-node count, or the poll hangs until wait_for_nodes_timeout and fails the apply."
 }
 
 variable "wait_for_nodes_timeout" {

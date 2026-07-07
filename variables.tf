@@ -206,7 +206,18 @@ variable "initial_node_labels_extra" {
 
 variable "initial_instance_types" {
   type        = list(string)
-  description = "instance types of the initial managed node group"
+  description = "instance types of the initial managed node group (must all be the same architecture; the node AMI type is derived from them)"
+
+  validation {
+    condition     = length(var.initial_instance_types) > 0
+    error_message = "initial_instance_types must not be empty."
+  }
+  validation {
+    # All types must share one architecture (all Graviton/arm64 or all x86_64),
+    # since the derived ami_type applies to the whole node group.
+    condition     = length(distinct([for t in var.initial_instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
+    error_message = "All initial_instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
+  }
 }
 
 variable "initial_node_timeouts" {

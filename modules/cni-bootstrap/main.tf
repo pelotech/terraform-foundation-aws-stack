@@ -4,9 +4,10 @@ locals {
   # `timeout` is the per-CNI wait default (overridden by var.wait_timeout).
   cni_defaults = {
     cilium = {
-      release_name  = "cilium"
-      repository    = "https://helm.cilium.io/"
-      chart         = "cilium"
+      release_name = "cilium"
+      repository   = "https://helm.cilium.io/"
+      chart        = "cilium"
+      # renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
       version       = "1.15.6"
       timeout       = 600
       wait_default  = false # agent bootstraps NotReady nodes; install concurrently
@@ -29,8 +30,9 @@ locals {
       # must match the cluster service CIDR — set from var.service_cidr (wire the
       # foundation eks_cluster_service_cidr output). Pairs with the
       # kube-ovn/role=master node label set by stack_cni="kube-ovn".
-      repository    = "oci://ghcr.io/pelotech/charts"
-      chart         = "kube-ovn"
+      repository = "oci://ghcr.io/pelotech/charts"
+      chart      = "kube-ovn"
+      # renovate: datasource=docker depName=ghcr.io/pelotech/charts/kube-ovn
       version       = "v1.13.9"
       timeout       = 900  # 15m
       wait_default  = true # must read node IPs / schedule on the master node first

@@ -25,7 +25,9 @@ label_desc="${SELECTOR:-<any>}"
 deadline=$(( $(date +%s) + TIMEOUT ))
 
 while :; do
-  n="$(kubectl get nodes "${selector_args[@]}" --no-headers 2>/dev/null | wc -l | tr -d '[:space:]')"
+  # Tolerate a transiently-unreachable API: on error treat the count as 0 and
+  # keep polling ( || true so `set -e`/pipefail don't abort the loop).
+  n="$(kubectl get nodes "${selector_args[@]}" --no-headers 2>/dev/null | wc -l | tr -d '[:space:]' || true)"
   n="${n:-0}"
   if [ "$n" -ge "$COUNT" ]; then
     echo "cni-bootstrap: found $n node(s) matching '$label_desc' (needed $COUNT)"
