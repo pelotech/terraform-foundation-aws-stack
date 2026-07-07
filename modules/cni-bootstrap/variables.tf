@@ -89,6 +89,24 @@ variable "wait_timeout" {
   description = "Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 900s/15m)."
 }
 
+variable "atomic" {
+  type        = bool
+  default     = true
+  description = "Roll the release back on a failed install/upgrade (helm --atomic). Prevents a leftover pending-install/failed record that later causes 'cannot re-use a name that is still in use' on a repair. Implies wait."
+}
+
+variable "cleanup_on_fail" {
+  type        = bool
+  default     = true
+  description = "Delete new resources created during a failed upgrade (helm --cleanup-on-fail)."
+}
+
+variable "replace" {
+  type        = bool
+  default     = false
+  description = "Reuse a release name whose existing release is failed/pending/deleted-in-history (helm install --replace) — lets a repair reclaim a stuck name without a manual `helm uninstall`. Does NOT adopt a healthy deployed release (use `terraform import`). Marked unsafe for production by Helm."
+}
+
 variable "wait_for_nodes" {
   type        = bool
   default     = null

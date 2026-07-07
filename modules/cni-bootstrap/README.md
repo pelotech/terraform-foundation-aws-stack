@@ -46,6 +46,17 @@ module "cni_bootstrap" {
 Do **not** add `depends_on = [<node group>]` — that serializes the install after
 the node group and reintroduces the hang.
 
+### Repairing an install
+
+The release is created with `atomic`/`cleanup_on_fail` (defaults on), so a
+failed/timed-out install rolls back instead of leaving a stuck `pending-install`
+record. If you still hit `cannot re-use a name that is still in use` on a repair:
+
+- **Release is `failed`/`pending`** (`helm list -A --all`) → set `replace = true`
+  for one apply to reclaim the name, or `helm uninstall <name> -n <ns>` then apply.
+- **Release is healthy (`deployed`)** but not in Terraform state → adopt it:
+  `terraform import 'module.cni_bootstrap.helm_release.cni[0]' <namespace>/<name>`.
+
 ### Custom CNI
 
 ```hcl
@@ -77,7 +88,7 @@ module "cni_bootstrap" {
 }
 ```
 
-> Installs the OCI chart `oci://ghcr.io/uki-code/charts/kube-ovn` at `v1.13.9`
+> Installs the OCI chart `oci://ghcr.io/pelotech/charts/kube-ovn` at `v1.13.9`
 > (release name `kube-ovn`, 15m/900s default timeout) with pinger/resource
 > defaults baked in. **`ipv4.SVC_CIDR` comes from `service_cidr`** — wire the
 > foundation `eks_cluster_service_cidr` output so it matches the cluster's actual
@@ -118,7 +129,9 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_atomic"></a> [atomic](#input\_atomic) | Roll the release back on a failed install/upgrade (helm --atomic). Prevents a leftover pending-install/failed record that later causes 'cannot re-use a name that is still in use' on a repair. Implies wait. | `bool` | `true` | no |
 | <a name="input_chart_version"></a> [chart\_version](#input\_chart\_version) | Override the CNI Helm chart version. null uses the built-in default for the selected cni (ignored for custom, which uses custom\_chart.version). | `string` | `null` | no |
+| <a name="input_cleanup_on_fail"></a> [cleanup\_on\_fail](#input\_cleanup\_on\_fail) | Delete new resources created during a failed upgrade (helm --cleanup-on-fail). | `bool` | `true` | no |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | EKS cluster name (from the foundation eks\_cluster\_name output). Required when wait\_for\_nodes is enabled (kube-ovn default) so the node-registration poll can reach the cluster. | `string` | `""` | no |
 | <a name="input_cni"></a> [cni](#input\_cni) | Which CNI to install. One of: cilium, kube-ovn, custom. Use custom with custom\_chart to install any Helm-packaged CNI. | `string` | `"cilium"` | no |
 | <a name="input_create"></a> [create](#input\_create) | Whether to install the CNI Helm release. | `bool` | `true` | no |
@@ -129,6 +142,7 @@ No modules.
 | <a name="input_kube_proxy_replacement"></a> [kube\_proxy\_replacement](#input\_kube\_proxy\_replacement) | Enable Cilium kube-proxy replacement (cni=cilium only). When true, k8sServiceHost/k8sServicePort are set from k8s\_service\_host. | `bool` | `true` | no |
 | <a name="input_namespace"></a> [namespace](#input\_namespace) | Namespace to install the CNI release into. | `string` | `"kube-system"` | no |
 | <a name="input_region"></a> [region](#input\_region) | AWS region of the cluster (from the foundation region output). Required when wait\_for\_nodes is enabled — the same cluster name can exist in multiple regions, so the poll must region-qualify it. | `string` | `""` | no |
+| <a name="input_replace"></a> [replace](#input\_replace) | Reuse a release name whose existing release is failed/pending/deleted-in-history (helm install --replace) — lets a repair reclaim a stuck name without a manual `helm uninstall`. Does NOT adopt a healthy deployed release (use `terraform import`). Marked unsafe for production by Helm. | `bool` | `false` | no |
 | <a name="input_service_cidr"></a> [service\_cidr](#input\_service\_cidr) | Kubernetes service CIDR for kube-ovn (ipv4.SVC\_CIDR). Required for kube-ovn — wire from the foundation module's eks\_cluster\_service\_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom. | `string` | `""` | no |
 | <a name="input_wait_for_nodes"></a> [wait\_for\_nodes](#input\_wait\_for\_nodes) | Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster\_name + region. | `bool` | `null` | no |
 | <a name="input_wait_for_nodes_count"></a> [wait\_for\_nodes\_count](#input\_wait\_for\_nodes\_count) | Minimum number of registered nodes matching the selector before install proceeds. Default 3 matches the foundation initial\_node\_desired\_size default; set this to your actual master-node count, or the poll hangs until wait\_for\_nodes\_timeout and fails the apply. | `number` | `3` | no |

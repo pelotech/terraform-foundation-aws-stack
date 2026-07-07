@@ -101,6 +101,13 @@ resource "helm_release" "cni" {
   namespace  = var.namespace
   timeout    = local.timeout
 
+  # atomic/cleanup_on_fail roll back a failed install so it doesn't leave a
+  # pending-install record that blocks the next repair; replace lets a repair
+  # reclaim a name whose release is already stuck (failed/pending).
+  atomic          = var.atomic
+  cleanup_on_fail = var.cleanup_on_fail
+  replace         = var.replace
+
   set    = local.set
   values = var.helm_values
 

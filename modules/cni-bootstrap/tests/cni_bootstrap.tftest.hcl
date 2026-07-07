@@ -19,6 +19,10 @@ run "cilium_defaults" {
     error_message = "cilium must install concurrently (no node-registration gate)"
   }
   assert {
+    condition     = helm_release.cni[0].atomic == true && helm_release.cni[0].cleanup_on_fail == true && helm_release.cni[0].replace == false
+    error_message = "defaults must be atomic + cleanup_on_fail on, replace off"
+  }
+  assert {
     condition     = anytrue([for s in output.resolved_set : s.name == "kubeProxyReplacement" && s.value == "true"])
     error_message = "cilium must enable kubeProxyReplacement by default"
   }
