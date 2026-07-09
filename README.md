@@ -49,6 +49,24 @@ initial_node_labels_extra = { "team" = "platform" }
 # initial_node_labels = {}
 ```
 
+### Read-only / CI access split
+
+`stack_ro_arns` now grants only `AmazonEKSViewPolicy` (view resources, **not**
+Secrets) and **no longer receives KMS access**. A new **`stack_admin_ro_arns`**
+grants `AmazonEKSAdminViewPolicy` (read Secrets + ConfigMaps) plus KMS read
+(via `kms_key_administrators`), intended for CI `terraform plan`.
+
+**Migration:** move any CI plan role that must read cluster Secrets or decrypt
+KMS during plan (e.g. `gh-pr-plan`) from `stack_ro_arns` → `stack_admin_ro_arns`.
+Roles needing only plain read-only stay in `stack_ro_arns`.
+
+> **You may need to run `terraform apply` twice.** The principal moves between two
+> separately-keyed access-entry sets (`ro_*` → `admin_ro_*`) for the same
+> `principal_arn`, so Terraform can try to create the new access entry before
+> deleting the old one — and AWS allows only one access entry per principal, so the
+> first apply may fail with an "already exists" error. Re-run `terraform apply` and
+> it completes (the old entry is gone by the second run).
+
 ## Upgrading to v7.0.0 (breaking changes)
 
 This release puts the three core EKS addons under Terraform management via
