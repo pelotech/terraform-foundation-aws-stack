@@ -174,6 +174,12 @@ variable "stack_admin_arns" {
   description = "arn to the roles for the cluster admins role"
 }
 
+variable "stack_admin_ro_arns" {
+  type        = list(string)
+  default     = []
+  description = "arn to the roles for the cluster admin read only role with secret and configmap, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries"
+}
+
 variable "stack_ro_arns" {
   type        = list(string)
   default     = []

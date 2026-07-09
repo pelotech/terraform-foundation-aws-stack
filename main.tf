@@ -34,6 +34,19 @@ locals {
       principal_arn = item
       policy_associations = {
         view_only = {
+          policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
+  admin_ro_access_entries = {
+    for index, item in var.stack_admin_ro_arns : "admin_ro_${index}" => {
+      principal_arn = item
+      policy_associations = {
+        admin_view_only = {
           policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy"
           access_scope = {
             type = "cluster"
@@ -301,7 +314,7 @@ module "eks" {
       "secrets"
     ]
   } : {}
-  kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_ro_arns) : []
+  kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_admin_ro_arns) : []
   eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
     "initial-${var.stack_name}" = {
       iam_role_use_name_prefix       = false
@@ -338,7 +351,7 @@ module "eks" {
       timeouts                     = var.initial_node_timeouts
     }
   } : {}
-  access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.extra_access_entries)
+  access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.admin_ro_access_entries, local.extra_access_entries)
   tags = merge(var.stack_tags, {
     # NOTE - if creating multiple security groups with this module, only tag the
     # security group that Karpenter should utilize with the following tag
