@@ -162,3 +162,18 @@ output "cluster_addons_enabled_resolved" {
   description = "(introspection) Managed addon enablement after resolving stack_cni and the stack_enable_*_addon overrides"
   value       = local.cluster_addons_enabled
 }
+
+output "cni_node_group_enabled" {
+  description = "(introspection) Whether the dedicated CNI node group is created (true for kube-ovn unless disabled)."
+  value       = local.enable_cni_node_group
+}
+
+output "cni_node_taints_resolved" {
+  description = "(introspection) Taints applied to the dedicated CNI node group ({} when not created)."
+  value       = local.cni_node_taints
+}
+
+output "cni_node_labels_resolved" {
+  description = "(introspection) Labels applied to the dedicated CNI node group ({} when not created)."
+  value       = local.cni_node_labels
+}

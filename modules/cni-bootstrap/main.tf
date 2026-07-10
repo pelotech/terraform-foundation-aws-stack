@@ -65,11 +65,24 @@ locals {
   }
 
   selected = local.cni_defaults[var.cni]
-  set      = concat(local.selected.set, var.helm_set)
-  timeout  = coalesce(var.wait_timeout, local.selected.timeout)
 
   wait_for_nodes = var.wait_for_nodes != null ? var.wait_for_nodes : local.selected.wait_default
   node_selector  = var.wait_for_nodes_selector != null ? var.wait_for_nodes_selector : local.selected.wait_selector
+
+  # kube-ovn pins ovn-central to the nodes matching MASTER_NODES_LABEL at deploy time —
+  # drive it from the same selector the register-poll uses (surge-ready: a generation-
+  # stamped value later targets a new node group without further module changes).
+  master_label_set = var.cni == "kube-ovn" ? [{ name = "MASTER_NODES_LABEL", value = local.node_selector }] : []
+  # Inert value that changes with bootstrap_generation so a bump forces `helm upgrade`
+  # (re-reads the current master node IPs after a recycle). Charts ignore unknown keys.
+  # NOTE: this only recycles the master correctly when there is a single matching node.
+  # kube-ovn re-reads the IP of whatever node the poll binds, so bump this during the
+  # RE-ENABLE apply (after the old master node group is destroyed) — bumping it while the
+  # old master is still registered binds the stale node and re-applies the old IP (no-op).
+  generation_set = var.bootstrap_generation != "" ? [{ name = "cniBootstrapGeneration", value = var.bootstrap_generation }] : []
+
+  set     = concat(local.selected.set, local.master_label_set, local.generation_set, var.helm_set)
+  timeout = coalesce(var.wait_timeout, local.selected.timeout)
 }
 
 # Optional gate: wait for nodes to register before installing (kube-ovn needs the
@@ -78,6 +91,12 @@ locals {
 # creation and avoids the managed-node-group readiness deadlock.
 resource "terraform_data" "wait_nodes" {
   count = var.create && local.wait_for_nodes ? 1 : 0
+
+  # Re-run the poll (and, via the helm generation_set, the CNI reapply) when the
+  # operator bumps bootstrap_generation during a node recycle/upgrade. Reliable only
+  # when the old master is already gone (see generation_set note): with the old node
+  # still present the poll can bind it instead of the freshly-recycled master.
+  triggers_replace = [var.bootstrap_generation]
 
   provisioner "local-exec" {
     command = "bash ${path.module}/scripts/wait-for-nodes.sh"

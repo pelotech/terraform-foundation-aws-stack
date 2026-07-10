@@ -107,6 +107,12 @@ variable "replace" {
   description = "Reuse a release name whose existing release is failed/pending/deleted-in-history (helm install --replace) — lets a repair reclaim a stuck name without a manual `helm uninstall`. Does NOT adopt a healthy deployed release (use `terraform import`). Marked unsafe for production by Helm."
 }
 
+variable "bootstrap_generation" {
+  type        = string
+  default     = ""
+  description = "Bump this to force a re-bootstrap: re-runs the node-registration poll and re-applies the CNI helm release against the current nodes. Used during a node recycle/upgrade (e.g. kube-ovn) so the chart re-reads the new master node IPs. Bump it in the RE-ENABLE apply, after the old master node group is destroyed — bumping while the old master is still registered binds the stale node and re-applies the old IP (a no-op). Empty (default) = no forced re-apply."
+}
+
 variable "wait_for_nodes" {
   type        = bool
   default     = null
@@ -121,8 +127,8 @@ variable "wait_for_nodes_selector" {
 
 variable "wait_for_nodes_count" {
   type        = number
-  default     = 3
-  description = "Minimum number of registered nodes matching the selector before install proceeds. Default 3 matches the foundation initial_node_desired_size default; set this to your actual master-node count, or the poll hangs until wait_for_nodes_timeout and fails the apply."
+  default     = 1
+  description = "Minimum number of registered nodes matching the selector before install proceeds. Default 1 matches the dedicated CNI node group's default size (foundation cni_node_size); set this to your CNI node group's size, or the poll hangs until wait_for_nodes_timeout and fails the apply."
 }
 
 variable "wait_for_nodes_timeout" {

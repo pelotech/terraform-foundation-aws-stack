@@ -7,23 +7,33 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 
 ## Upgrading to v8.0.0 (breaking changes)
 
-This release introduces a single **`stack_cni`** selector that drives the
-initial node group's taints/labels *and* the vpc-cni/kube-proxy addon
-enablement from one CNI profile. The supported profiles are `cilium`,
-`kube-ovn`, and `vpc-cni`, and the **default is now `cilium`** (previously the
-defaults silently assumed kube-ovn + multus/nidhogg).
+This release introduces a single **`stack_cni`** selector that drives the initial
+node group's taints/labels *and* the vpc-cni/kube-proxy addon enablement from one
+CNI profile. The supported profiles are `cilium`, `kube-ovn`, and `vpc-cni`, and
+the **default is now `cilium`** (previously the defaults silently assumed kube-ovn
++ multus/nidhogg). The taints/labels below apply to the **initial (system) node
+group**; for `kube-ovn` the master label + nidhogg taint move to a dedicated CNI
+node group (see the note under the table).
 
-| CNI profile | Taints                                                             | Labels                  | vpc-cni | kube-proxy |
-| ----------- | ------------------------------------------------------------------ | ----------------------- | ------- | ---------- |
-| `cilium`    | `CriticalAddonsOnly`, `node.cilium.io/agent-not-ready:NO_EXECUTE`  | none                    | off     | off        |
-| `kube-ovn`  | `CriticalAddonsOnly`, `nidhogg.uswitch.com/...kube-multus-ds`      | `kube-ovn/role=master`  | off     | on         |
-| `vpc-cni`   | `CriticalAddonsOnly`                                               | none                    | on      | on         |
+| CNI profile | Initial-group taints                                              | Initial-group labels | vpc-cni | kube-proxy |
+| ----------- | ----------------------------------------------------------------- | -------------------- | ------- | ---------- |
+| `cilium`    | `CriticalAddonsOnly`, `node.cilium.io/agent-not-ready:NO_EXECUTE` | none                 | off     | off        |
+| `kube-ovn`  | `CriticalAddonsOnly`                                              | none                 | off     | on         |
+| `vpc-cni`   | `CriticalAddonsOnly`                                              | none                 | on      | on         |
+
+> **kube-ovn** additionally provisions a dedicated 1-node `cni-<stack>` node group
+> that carries the `kube-ovn/role=master` label + the `nidhogg…kube-multus-ds`
+> taint and hosts `ovn-central` — kept separate so upgrades recycle it without
+> touching the system group. See ["Node upgrades on kube-ovn"](#node-upgrades-on-kube-ovn-version-bumps--security-patches).
 
 ### What happens on first apply against an existing cluster
 
 - **Set `stack_cni` to match your current CNI.** Consumers previously on the
-  defaults were effectively running kube-ovn — set `stack_cni = "kube-ovn"`
-  to preserve the prior taints/labels and avoid churn.
+  defaults were effectively running kube-ovn — set `stack_cni = "kube-ovn"` (and
+  `cni_node_kubernetes_version`, now required). Note this **provisions the new
+  dedicated `cni-<stack>` node group** and moves the master label/nidhogg taint
+  off the initial group, so expect the new group plus an initial-group roll — it
+  does **not** preserve the old single-group layout unchanged.
 - **Leaving the default (`cilium`) changes node group taints/labels**, which
   forces the managed node group to roll/replace nodes. Only take the default
   if you intend to run Cilium.
@@ -66,6 +76,44 @@ Roles needing only plain read-only stay in `stack_ro_arns`.
 > deleting the old one — and AWS allows only one access entry per principal, so the
 > first apply may fail with an "already exists" error. Re-run `terraform apply` and
 > it completes (the old entry is gone by the second run).
+
+### Node upgrades on kube-ovn (version bumps & security patches)
+
+kube-ovn pins `ovn-central` to the master nodes present at deploy time (via
+`MASTER_NODES_LABEL`), so replacing those nodes with a normal in-place EKS rolling
+update breaks it mid-roll and deadlocks. Node replacement must be a **deliberate
+recycle** (destroy/recreate).
+
+**How it's structured:** for `stack_cni = "kube-ovn"` the module runs **two** node
+groups — the `initial-<stack>` **system group** (coredns + critical addons; carries
+only `CriticalAddonsOnly`; follows `eks_cluster_version`; rolls in place) and a
+dedicated 1-node `cni-<stack>` **control-plane group** (`kube-ovn/role=master` +
+nidhogg taint; version-pinned; recycled). Because the recycle destroys **only the
+1-node CNI group**, coredns/DNS and the system group stay up — no coredns/PDB dance,
+and at most one coredns replica is ever disrupted so its PDB is always satisfied.
+(`cilium`/`vpc-cni` get just the one initial group.)
+
+**Breaking:** for `stack_cni = "kube-ovn"` you must set **`cni_node_kubernetes_version`**
+(pin the CNI group's k8s version). This decouples it from `eks_cluster_version`, so a
+control-plane bump does **not** auto-roll the master node.
+
+**Upgrade runbook (recycle; small kube-ovn control-plane blip):**
+1. Bump `eks_cluster_version`, leaving `cni_node_kubernetes_version` at the **current** version → `apply`. Control plane upgrades; the system group rolls in place; the CNI group is untouched (kube-ovn healthy).
+2. Set `stack_enable_cni_node_group = false` → `apply`. The 1-node CNI group is destroyed; `ovn-central` down briefly — **coredns/DNS and the system group stay up**.
+3. Set `stack_enable_cni_node_group = true`, set `cni_node_kubernetes_version` to the new version, and **bump `bootstrap_generation`** on the `cni-bootstrap` module (any new value — e.g. the new version — forces the poll to re-run and kube-ovn to re-apply) → `apply`. A fresh CNI node is created at the new version → registers → the poll gates → kube-ovn re-applies against the new master → `Ready`.
+
+> **The step 2 → step 3 ordering is load-bearing.** Step 2's `apply` must
+> **fully complete** (the old CNI node destroyed) before you re-enable in step 3.
+> The re-apply relies on there being exactly **one** `kube-ovn/role=master` node so
+> the poll and kube-ovn bind the *new* master. If you bump `bootstrap_generation`
+> while the old master is still registered — e.g. by combining steps 2 and 3 into a
+> single apply — the poll binds the **stale** node and kube-ovn re-applies against
+> the old IP: a silent no-op (the node isn't actually recycled). Keep them as two
+> separate applies.
+
+**Security patch (same k8s version):** skip step 1; in steps 2–3 bump
+`cni_node_ami_release_version` (instead of the k8s version) together with
+`bootstrap_generation`.
 
 ## Upgrading to v7.0.0 (breaking changes)
 
@@ -142,11 +190,16 @@ Pick a CNI with `stack_cni` — it sets the initial node group taints/labels and
 the vpc-cni/kube-proxy addon toggles to match. All values remain overridable
 (see below).
 
-| `stack_cni`         | vpc-cni | kube-proxy | Node taints/labels                                     | Notes                                                       |
-| ------------------- | ------- | ---------- | ------------------------------------------------------ | ----------------------------------------------------------- |
-| `cilium` (default)  | off     | off        | `CriticalAddonsOnly` + cilium agent-not-ready          | Install Cilium (kube-proxy replacement) via Helm.           |
-| `kube-ovn`          | off     | on         | `CriticalAddonsOnly` + nidhogg/multus, `kube-ovn/role` | Install via Helm/ArgoCD post-bootstrap.                     |
-| `vpc-cni`           | on      | on         | `CriticalAddonsOnly`                                    | AWS native. IRSA / prefix delegation via `*_overrides`.     |
+| `stack_cni`         | vpc-cni | kube-proxy | Initial-group taints/labels                   | Notes                                                       |
+| ------------------- | ------- | ---------- | --------------------------------------------- | ----------------------------------------------------------- |
+| `cilium` (default)  | off     | off        | `CriticalAddonsOnly` + cilium agent-not-ready | Install Cilium (kube-proxy replacement) via Helm.           |
+| `kube-ovn`          | off     | on         | `CriticalAddonsOnly`                           | Also adds a dedicated CNI node group (see note). Install via Helm/ArgoCD post-bootstrap. |
+| `vpc-cni`           | on      | on         | `CriticalAddonsOnly`                           | AWS native. IRSA / prefix delegation via `*_overrides`.     |
+
+> **kube-ovn** provisions an extra dedicated 1-node `cni-<stack>` node group that
+> carries the `kube-ovn/role=master` label + the `nidhogg…kube-multus-ds` taint
+> (not the system group) and requires `cni_node_kubernetes_version`. See
+> ["Node upgrades on kube-ovn"](#node-upgrades-on-kube-ovn-version-bumps--security-patches).
 
 For any other CNI, pick the closest profile and override the addon toggles /
 taints / labels as needed — anything that wants a clean slate works the same.
@@ -190,7 +243,11 @@ benefits (DSR, no iptables scaling cliff).
 ```hcl
 module "foundation" {
   # ...
-  stack_cni = "kube-ovn" # vpc-cni off, kube-proxy on, multus/nidhogg taint + kube-ovn/role label
+  stack_cni = "kube-ovn" # vpc-cni off, kube-proxy on; system group gets only CriticalAddonsOnly
+
+  # Required for kube-ovn: pins the dedicated CNI node group (kube-ovn/role=master
+  # + nidhogg taint) so a control-plane bump never auto-rolls the master node.
+  cni_node_kubernetes_version = "1.35"
 }
 ```
 
@@ -335,6 +392,10 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="input_initial_instance_types"></a> [initial\_instance\_types](#input\_initial\_instance\_types) | instance types of the initial managed node group (must all be the same architecture; the node AMI type is derived from them) | `list(string)` | n/a | yes |
 | <a name="input_cluster_enabled_log_types"></a> [cluster\_enabled\_log\_types](#input\_cluster\_enabled\_log\_types) | List of EKS control plane log types to enable. Valid values: api, audit, authenticator, controllerManager, scheduler. | `list(string)` | `[]` | no |
 | <a name="input_cluster_endpoint_public_access"></a> [cluster\_endpoint\_public\_access](#input\_cluster\_endpoint\_public\_access) | Whether the EKS cluster API server endpoint is publicly accessible. Set to false for private-only access (requires VPC connectivity). | `bool` | `true` | no |
+| <a name="input_cni_node_ami_release_version"></a> [cni\_node\_ami\_release\_version](#input\_cni\_node\_ami\_release\_version) | Pin the dedicated CNI node group's AMI release version (e.g. for a same-version security patch). null uses the default AMI for its kubernetes\_version. Bump it (with stack\_enable\_cni\_node\_group toggled) to recycle onto a patched AMI. | `string` | `null` | no |
+| <a name="input_cni_node_instance_types"></a> [cni\_node\_instance\_types](#input\_cni\_node\_instance\_types) | Instance types for the dedicated CNI node group. null falls back to initial\_instance\_types. Must all be one architecture (the AMI type is derived from them). | `list(string)` | `null` | no |
+| <a name="input_cni_node_kubernetes_version"></a> [cni\_node\_kubernetes\_version](#input\_cni\_node\_kubernetes\_version) | Kubernetes version the dedicated CNI node group runs — bump this to upgrade it. Decoupled from eks\_cluster\_version so a control-plane bump doesn't auto-roll it. null follows eks\_cluster\_version. REQUIRED for stack\_cni="kube-ovn" so a control-plane bump never auto-rolls the master node (deadlock); replace it deliberately via the recycle (toggle stack\_enable\_cni\_node\_group + bump cni-bootstrap's bootstrap\_generation). | `string` | `null` | no |
+| <a name="input_cni_node_size"></a> [cni\_node\_size](#input\_cni\_node\_size) | Number of nodes in the dedicated CNI node group (min=max=desired). Default 1 = a single kube-ovn ovn-central master. | `number` | `1` | no |
 | <a name="input_create_node_security_group"></a> [create\_node\_security\_group](#input\_create\_node\_security\_group) | Whether to create a dedicated security group for EKS managed node groups. When true, the node\_security\_group\_id output is populated. | `bool` | `false` | no |
 | <a name="input_eks_cluster_version"></a> [eks\_cluster\_version](#input\_eks\_cluster\_version) | Kubernetes version to set for the cluster | `string` | `"1.35"` | no |
 | <a name="input_extra_access_entries"></a> [extra\_access\_entries](#input\_extra\_access\_entries) | EKS access entries needed by IAM roles interacting with this cluster | <pre>list(object({<br/>    principal_arn     = string<br/>    kubernetes_groups = optional(list(string))<br/>    policy_associations = optional(map(object({<br/>      policy_arn = string<br/>      access_scope = object({<br/>        type       = string<br/>        namespaces = optional(list(string))<br/>      })<br/>    })), {})<br/><br/>  }))</pre> | `[]` | no |
@@ -354,10 +415,11 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="input_stack_admin_arns"></a> [stack\_admin\_arns](#input\_stack\_admin\_arns) | arn to the roles for the cluster admins role | `list(string)` | `[]` | no |
 | <a name="input_stack_admin_ro_arns"></a> [stack\_admin\_ro\_arns](#input\_stack\_admin\_ro\_arns) | arn to the roles for the cluster admin read only role with secret and configmap, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries | `list(string)` | `[]` | no |
 | <a name="input_stack_cluster_addons_overrides"></a> [stack\_cluster\_addons\_overrides](#input\_stack\_cluster\_addons\_overrides) | Per-addon overrides keyed by addon name (e.g. "vpc-cni", "kube-proxy", "coredns"). Merges over module defaults — use for version pinning, vpc-cni prefix delegation, custom networking, etc. Accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map. | `any` | `{}` | no |
-| <a name="input_stack_cni"></a> [stack\_cni](#input\_stack\_cni) | CNI profile driving the initial node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. Override individual pieces with initial\_node\_taints(\_extra)/initial\_node\_labels(\_extra) and the stack\_enable\_*\_addon toggles. | `string` | `"cilium"` | no |
+| <a name="input_stack_cni"></a> [stack\_cni](#input\_stack\_cni) | CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the kube-ovn/role=master label + nidhogg taint move to a dedicated CNI node group (cni\_node\_* vars), not the system group. Override individual pieces with initial\_node\_taints(\_extra)/initial\_node\_labels(\_extra) and the stack\_enable\_*\_addon toggles. | `string` | `"cilium"` | no |
 | <a name="input_stack_create"></a> [stack\_create](#input\_stack\_create) | should resources be created | `bool` | `true` | no |
 | <a name="input_stack_create_pelotech_nat_eip"></a> [stack\_create\_pelotech\_nat\_eip](#input\_stack\_create\_pelotech\_nat\_eip) | should create pelotech nat eip even if NAT isn't enabled - nice for getting ips created for allow lists | `bool` | `false` | no |
 | <a name="input_stack_enable_cluster_kms"></a> [stack\_enable\_cluster\_kms](#input\_stack\_enable\_cluster\_kms) | Should secrets be encrypted by kms in the cluster | `bool` | `true` | no |
+| <a name="input_stack_enable_cni_node_group"></a> [stack\_enable\_cni\_node\_group](#input\_stack\_enable\_cni\_node\_group) | Create the dedicated CNI node group (kube-ovn control plane). null derives from stack\_cni (true for kube-ovn, false otherwise). Set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group. | `bool` | `null` | no |
 | <a name="input_stack_enable_coredns_addon"></a> [stack\_enable\_coredns\_addon](#input\_stack\_enable\_coredns\_addon) | Install coredns as a managed addon. Note: coredns will not schedule until a CNI is running and nodes are Ready. | `bool` | `true` | no |
 | <a name="input_stack_enable_default_eks_managed_node_group"></a> [stack\_enable\_default\_eks\_managed\_node\_group](#input\_stack\_enable\_default\_eks\_managed\_node\_group) | Ability to disable default node group | `bool` | `true` | no |
 | <a name="input_stack_enable_kube_proxy_addon"></a> [stack\_enable\_kube\_proxy\_addon](#input\_stack\_enable\_kube\_proxy\_addon) | Override installation of the kube-proxy managed addon. Leave null (default) to derive from stack\_cni (off for cilium kube-proxy replacement, on for kube-ovn/vpc-cni). Set true/false to force. | `bool` | `null` | no |
@@ -381,6 +443,9 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="output_cilium_k8s_service_host"></a> [cilium\_k8s\_service\_host](#output\_cilium\_k8s\_service\_host) | Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443. |
 | <a name="output_cluster_addons_enabled_resolved"></a> [cluster\_addons\_enabled\_resolved](#output\_cluster\_addons\_enabled\_resolved) | (introspection) Managed addon enablement after resolving stack\_cni and the stack\_enable\_*\_addon overrides |
 | <a name="output_cluster_security_group_id"></a> [cluster\_security\_group\_id](#output\_cluster\_security\_group\_id) | Cluster security group that was created by Amazon EKS for the cluster |
+| <a name="output_cni_node_group_enabled"></a> [cni\_node\_group\_enabled](#output\_cni\_node\_group\_enabled) | (introspection) Whether the dedicated CNI node group is created (true for kube-ovn unless disabled). |
+| <a name="output_cni_node_labels_resolved"></a> [cni\_node\_labels\_resolved](#output\_cni\_node\_labels\_resolved) | (introspection) Labels applied to the dedicated CNI node group ({} when not created). |
+| <a name="output_cni_node_taints_resolved"></a> [cni\_node\_taints\_resolved](#output\_cni\_node\_taints\_resolved) | (introspection) Taints applied to the dedicated CNI node group ({} when not created). |
 | <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver IRSA role |
 | <a name="output_eks_cluster_certificate_authority_data"></a> [eks\_cluster\_certificate\_authority\_data](#output\_eks\_cluster\_certificate\_authority\_data) | Base64 encoded certificate data for the cluster |
 | <a name="output_eks_cluster_endpoint"></a> [eks\_cluster\_endpoint](#output\_eks\_cluster\_endpoint) | The endpoint for the EKS cluster API server |

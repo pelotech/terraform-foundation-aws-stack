@@ -95,30 +95,42 @@ locals {
   # CNI profiles: stack_cni selects the taints/labels and vpc-cni/kube-proxy addon
   # enablement appropriate for the chosen CNI. Individual pieces stay overridable
   # (initial_node_taints(_extra)/initial_node_labels(_extra) and the addon toggles).
+  # `system_taints`/`system_labels` apply to the initial/system node group (coredns +
+  # critical addons). `cni_node` (null unless the CNI needs it) describes a dedicated
+  # node group for the CNI's control plane — kube-ovn's ovn-central, which pins to its
+  # master nodes' IPs and so must be recycled (destroy/recreate) rather than rolled.
   cni_profiles = {
     cilium = {
-      taints = {
+      system_taints = {
         critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
         cilium               = { key = "node.cilium.io/agent-not-ready", value = "true", effect = "NO_EXECUTE" }
       }
-      labels                  = {}
+      system_labels           = {}
+      cni_node                = null
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = false # cilium kube-proxy replacement
     }
     "kube-ovn" = {
-      taints = {
+      system_taints = {
         critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
-        nidhogg              = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
       }
-      labels                  = { "kube-ovn/role" = "master" }
+      system_labels = {}
+      cni_node = {
+        labels = { "kube-ovn/role" = "master" }
+        taints = {
+          critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+          nidhogg              = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
+        }
+      }
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = true
     }
     "vpc-cni" = {
-      taints = {
+      system_taints = {
         critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
       }
-      labels                  = {}
+      system_labels           = {}
+      cni_node                = null
       enable_vpc_cni_addon    = true
       enable_kube_proxy_addon = true
     }
@@ -126,8 +138,45 @@ locals {
   cni = local.cni_profiles[var.stack_cni]
 
   # Override model: full-override var wins entirely (null = derive); otherwise preset + _extra merge.
-  initial_taints = var.initial_node_taints != null ? var.initial_node_taints : merge(local.cni.taints, var.initial_node_taints_extra)
-  initial_labels = var.initial_node_labels != null ? var.initial_node_labels : merge(local.cni.labels, var.initial_node_labels_extra)
+  initial_taints = var.initial_node_taints != null ? var.initial_node_taints : merge(local.cni.system_taints, var.initial_node_taints_extra)
+  initial_labels = var.initial_node_labels != null ? var.initial_node_labels : merge(local.cni.system_labels, var.initial_node_labels_extra)
+
+  # Dedicated CNI node group (kube-ovn control plane): exists only for profiles that
+  # define cni_node, and can be toggled off (recycle) via stack_enable_cni_node_group.
+  enable_cni_node_group   = local.cni.cni_node != null && coalesce(var.stack_enable_cni_node_group, true)
+  cni_node_taints         = try(local.cni.cni_node.taints, {})
+  cni_node_labels         = try(local.cni.cni_node.labels, {})
+  cni_node_instance_types = coalesce(var.cni_node_instance_types, var.initial_instance_types)
+  cni_node_is_arm         = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", local.cni_node_instance_types[0]))
+
+  # Settings shared by both managed node groups (per-group bits merged on top below).
+  node_group_common = {
+    iam_role_use_name_prefix       = false
+    iam_role_permissions_boundary  = local.permissions_boundary_arn
+    capacity_type                  = "ON_DEMAND"
+    enable_monitoring              = true
+    use_latest_ami_release_version = false
+    metadata_options = {
+      http_endpoint               = "enabled"
+      http_put_response_hop_limit = 2
+      http_tokens                 = "required"
+    }
+    block_device_mappings = {
+      xvda = {
+        device_name = "/dev/xvda"
+        ebs = {
+          volume_size           = 100
+          volume_type           = "gp3"
+          encrypted             = true
+          delete_on_termination = true
+        }
+      }
+    }
+    cloudinit_pre_nodeadm        = local.enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
+    pre_bootstrap_user_data      = var.pre_bootstrap_user_data
+    iam_role_additional_policies = var.node_iam_additional_policies
+    timeouts                     = var.initial_node_timeouts
+  }
 
   # Addon toggles: explicit bool wins; null = derive from CNI profile.
   enable_vpc_cni_addon    = var.stack_enable_vpc_cni_addon != null ? var.stack_enable_vpc_cni_addon : local.cni.enable_vpc_cni_addon
@@ -315,42 +364,36 @@ module "eks" {
     ]
   } : {}
   kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_admin_ro_arns) : []
-  eks_managed_node_groups = var.stack_enable_default_eks_managed_node_group ? {
-    "initial-${var.stack_name}" = {
-      iam_role_use_name_prefix       = false
-      iam_role_permissions_boundary  = local.permissions_boundary_arn
-      instance_types                 = var.initial_instance_types
-      min_size                       = var.initial_node_min_size
-      max_size                       = var.initial_node_max_size
-      desired_size                   = var.initial_node_desired_size
-      ami_type                       = local.initial_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
-      capacity_type                  = "ON_DEMAND"
-      enable_monitoring              = true  # TODO: change from default with upgrade - research impact
-      use_latest_ami_release_version = false # TODO: change from default with upgrade - research impact
-      metadata_options = {                   # TODO: change from default with upgrade - research impact
-        http_endpoint               = "enabled"
-        http_put_response_hop_limit = 2
-        http_tokens                 = "required"
-      }
-      labels                  = local.initial_labels
-      cloudinit_pre_nodeadm   = local.enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
-      pre_bootstrap_user_data = var.pre_bootstrap_user_data
-      block_device_mappings = {
-        xvda = {
-          device_name = "/dev/xvda"
-          ebs = {
-            volume_size           = 100
-            volume_type           = "gp3"
-            encrypted             = true
-            delete_on_termination = true
-          }
-        }
-      }
-      taints                       = local.initial_taints
-      iam_role_additional_policies = var.node_iam_additional_policies
-      timeouts                     = var.initial_node_timeouts
-    }
-  } : {}
+  eks_managed_node_groups = merge(
+    # Initial / system group (coredns + critical addons). Follows the control-plane
+    # version and rolls in place on upgrade.
+    var.stack_enable_default_eks_managed_node_group ? {
+      "initial-${var.stack_name}" = merge(local.node_group_common, {
+        instance_types = var.initial_instance_types
+        min_size       = var.initial_node_min_size
+        max_size       = var.initial_node_max_size
+        desired_size   = var.initial_node_desired_size
+        ami_type       = local.initial_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
+        labels         = local.initial_labels
+        taints         = local.initial_taints
+      })
+    } : {},
+    # Dedicated CNI control-plane group (kube-ovn). Version-pinned and recycled
+    # (destroy/recreate) on upgrade so the initial group + coredns are untouched.
+    local.enable_cni_node_group ? {
+      "cni-${var.stack_name}" = merge(local.node_group_common, {
+        instance_types      = local.cni_node_instance_types
+        min_size            = var.cni_node_size
+        max_size            = var.cni_node_size
+        desired_size        = var.cni_node_size
+        kubernetes_version  = coalesce(var.cni_node_kubernetes_version, var.eks_cluster_version)
+        ami_release_version = var.cni_node_ami_release_version
+        ami_type            = local.cni_node_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
+        labels              = local.cni_node_labels
+        taints              = local.cni_node_taints
+      })
+    } : {},
+  )
   access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.admin_ro_access_entries, local.extra_access_entries)
   tags = merge(var.stack_tags, {
     # NOTE - if creating multiple security groups with this module, only tag the

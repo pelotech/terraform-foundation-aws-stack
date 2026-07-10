@@ -59,27 +59,54 @@ run "default_is_cilium" {
     condition     = output.cluster_addons_enabled_resolved["vpc-cni"] == false && output.cluster_addons_enabled_resolved["kube-proxy"] == false && output.cluster_addons_enabled_resolved["coredns"] == true
     error_message = "cilium profile must disable vpc-cni and kube-proxy (kube-proxy replacement) and keep coredns"
   }
+  assert {
+    condition     = output.cni_node_group_enabled == false
+    error_message = "cilium must not create a dedicated CNI node group"
+  }
 }
 
 run "kube_ovn_profile" {
   command = plan
 
   variables {
-    stack_cni = "kube-ovn"
+    stack_cni                   = "kube-ovn"
+    cni_node_kubernetes_version = "1.35"
   }
 
+  # Initial/system group: only CriticalAddonsOnly — the master label + nidhogg taint
+  # move to the dedicated CNI node group.
   assert {
-    condition     = output.initial_node_taints_resolved["nidhogg"].key == "nidhogg.uswitch.com/kube-system.kube-multus-ds"
-    error_message = "kube-ovn profile must apply the nidhogg/multus taint"
+    condition     = contains(keys(output.initial_node_taints_resolved), "critical_addons_only") && !contains(keys(output.initial_node_taints_resolved), "nidhogg")
+    error_message = "kube-ovn initial group must carry only CriticalAddonsOnly (no nidhogg)"
   }
   assert {
-    condition     = output.initial_node_labels_resolved["kube-ovn/role"] == "master"
-    error_message = "kube-ovn profile must label the node kube-ovn/role=master"
+    condition     = length(output.initial_node_labels_resolved) == 0
+    error_message = "kube-ovn initial group must not carry the kube-ovn/role=master label"
+  }
+  # Dedicated CNI node group carries the master label + nidhogg taint.
+  assert {
+    condition     = output.cni_node_group_enabled == true
+    error_message = "kube-ovn must create the dedicated CNI node group"
+  }
+  assert {
+    condition     = output.cni_node_labels_resolved["kube-ovn/role"] == "master" && contains(keys(output.cni_node_taints_resolved), "nidhogg")
+    error_message = "the CNI node group must carry kube-ovn/role=master + the nidhogg taint"
   }
   assert {
     condition     = output.cluster_addons_enabled_resolved["vpc-cni"] == false && output.cluster_addons_enabled_resolved["kube-proxy"] == true
     error_message = "kube-ovn profile must disable vpc-cni and keep kube-proxy"
   }
+}
+
+run "kube_ovn_requires_pinned_cni_node_version" {
+  command = plan
+
+  variables {
+    stack_cni = "kube-ovn"
+    # cni_node_kubernetes_version intentionally unset
+  }
+
+  expect_failures = [var.cni_node_kubernetes_version]
 }
 
 run "vpc_cni_profile" {
@@ -96,6 +123,10 @@ run "vpc_cni_profile" {
   assert {
     condition     = output.cluster_addons_enabled_resolved["vpc-cni"] == true && output.cluster_addons_enabled_resolved["kube-proxy"] == true
     error_message = "vpc-cni profile must enable vpc-cni and kube-proxy"
+  }
+  assert {
+    condition     = output.cni_node_group_enabled == false
+    error_message = "vpc-cni must not create a dedicated CNI node group"
   }
 }
 

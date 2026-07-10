@@ -84,6 +84,10 @@ run "kube_ovn_defaults" {
     error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr"
   }
   assert {
+    condition     = anytrue([for s in output.resolved_set : s.name == "MASTER_NODES_LABEL" && s.value == "kube-ovn/role=master"])
+    error_message = "kube-ovn must set MASTER_NODES_LABEL from the node selector"
+  }
+  assert {
     condition     = length(terraform_data.wait_nodes) == 1
     error_message = "kube-ovn must gate the install on node registration"
   }
@@ -219,5 +223,28 @@ run "create_false_installs_nothing" {
   assert {
     condition     = length(helm_release.cni) == 0
     error_message = "create=false must install no helm release"
+  }
+}
+
+run "bootstrap_generation_forces_reapply" {
+  command = plan
+
+  variables {
+    cni                  = "cilium"
+    bootstrap_generation = "42"
+  }
+
+  assert {
+    condition     = anytrue([for s in output.resolved_set : s.name == "cniBootstrapGeneration" && s.value == "42"])
+    error_message = "bootstrap_generation must add an inert set value that forces a helm re-apply on bump"
+  }
+}
+
+run "no_generation_by_default" {
+  command = plan
+
+  assert {
+    condition     = !anytrue([for s in output.resolved_set : s.name == "cniBootstrapGeneration"])
+    error_message = "empty bootstrap_generation must not add the forcing set value"
   }
 }

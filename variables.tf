@@ -39,7 +39,7 @@ variable "stack_tags" {
 variable "stack_cni" {
   type        = string
   default     = "cilium"
-  description = "CNI profile driving the initial node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. Override individual pieces with initial_node_taints(_extra)/initial_node_labels(_extra) and the stack_enable_*_addon toggles."
+  description = "CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the kube-ovn/role=master label + nidhogg taint move to a dedicated CNI node group (cni_node_* vars), not the system group. Override individual pieces with initial_node_taints(_extra)/initial_node_labels(_extra) and the stack_enable_*_addon toggles."
   validation {
     condition     = contains(["cilium", "kube-ovn", "vpc-cni"], var.stack_cni)
     error_message = "stack_cni must be one of: cilium, kube-ovn, vpc-cni."
@@ -224,6 +224,52 @@ variable "initial_instance_types" {
     condition     = length(distinct([for t in var.initial_instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
     error_message = "All initial_instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
   }
+}
+
+# --- Dedicated CNI node group (kube-ovn control plane) ---
+# For CNIs whose control plane is pinned to specific master nodes (kube-ovn's
+# ovn-central), a small dedicated node group hosts it so upgrades recycle it
+# WITHOUT draining the initial/system group (coredns + critical addons stay up).
+# Created by default only for stack_cni = "kube-ovn".
+
+variable "stack_enable_cni_node_group" {
+  type        = bool
+  default     = null
+  description = "Create the dedicated CNI node group (kube-ovn control plane). null derives from stack_cni (true for kube-ovn, false otherwise). Set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group."
+}
+
+variable "cni_node_kubernetes_version" {
+  type        = string
+  default     = null
+  description = "Kubernetes version the dedicated CNI node group runs — bump this to upgrade it. Decoupled from eks_cluster_version so a control-plane bump doesn't auto-roll it. null follows eks_cluster_version. REQUIRED for stack_cni=\"kube-ovn\" so a control-plane bump never auto-rolls the master node (deadlock); replace it deliberately via the recycle (toggle stack_enable_cni_node_group + bump cni-bootstrap's bootstrap_generation)."
+
+  validation {
+    condition     = var.stack_cni != "kube-ovn" || var.cni_node_kubernetes_version != null
+    error_message = "cni_node_kubernetes_version must be set when stack_cni = \"kube-ovn\" so a control-plane version bump does not auto-roll the CNI master node (kube-ovn deadlock). Set it to the current node k8s version, then bump it deliberately during a recycle."
+  }
+}
+
+variable "cni_node_instance_types" {
+  type        = list(string)
+  default     = null
+  description = "Instance types for the dedicated CNI node group. null falls back to initial_instance_types. Must all be one architecture (the AMI type is derived from them)."
+
+  validation {
+    condition     = var.cni_node_instance_types == null || length(distinct([for t in var.cni_node_instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
+    error_message = "All cni_node_instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
+  }
+}
+
+variable "cni_node_ami_release_version" {
+  type        = string
+  default     = null
+  description = "Pin the dedicated CNI node group's AMI release version (e.g. for a same-version security patch). null uses the default AMI for its kubernetes_version. Bump it (with stack_enable_cni_node_group toggled) to recycle onto a patched AMI."
+}
+
+variable "cni_node_size" {
+  type        = number
+  default     = 1
+  description = "Number of nodes in the dedicated CNI node group (min=max=desired). Default 1 = a single kube-ovn ovn-central master."
 }
 
 variable "initial_node_timeouts" {
