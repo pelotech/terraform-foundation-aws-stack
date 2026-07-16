@@ -239,6 +239,62 @@ module "vpc" {
   })
 }
 
+locals {
+  nat_tailscale_enabled = var.stack_pelotech_nat_enabled && var.stack_pelotech_nat_tailscale.enabled
+  # Module creates the SSM parameter when a plain key is supplied
+  nat_tailscale_create_ssm = local.nat_tailscale_enabled && var.stack_pelotech_nat_tailscale_auth_key != ""
+  # Effective SSM parameter name - the XOR validation on the variable guarantees exactly one source
+  nat_tailscale_auth_key_ssm  = var.stack_pelotech_nat_tailscale.auth_key_ssm != "" ? var.stack_pelotech_nat_tailscale.auth_key_ssm : "/${var.stack_name}/nat/tailscale-auth-key"
+  nat_tailscale_hostname_base = var.stack_pelotech_nat_tailscale.hostname != "" ? var.stack_pelotech_nat_tailscale.hostname : var.stack_name
+
+  nat_tailscale_conf_by_az = local.nat_tailscale_enabled ? {
+    for az in module.vpc.azs : az => compact([
+      "tailscale_enabled=\"true\"",
+      "tailscale_auth_key_ssm=\"${local.nat_tailscale_auth_key_ssm}\"",
+      var.stack_pelotech_nat_tailscale.advertise_routes != "" ? "tailscale_advertise_routes=\"${var.stack_pelotech_nat_tailscale.advertise_routes}\"" : "",
+      var.stack_pelotech_nat_tailscale.exit_node ? "tailscale_exit_node=\"true\"" : "",
+      "tailscale_hostname=\"${local.nat_tailscale_hostname_base}-${az}\"",
+      var.stack_pelotech_nat_tailscale.snat_subnet_routes ? "" : "tailscale_snat_subnet_routes=\"false\"",
+      var.stack_pelotech_nat_tailscale.extra_args != "" ? "tailscale_extra_args=\"${var.stack_pelotech_nat_tailscale.extra_args}\"" : "",
+    ])
+  } : {}
+
+  # Appended after the fck-nat module's own user_data part, which writes the
+  # base /etc/fck-nat.conf and restarts the service. Quoted heredoc so nothing
+  # is shell-expanded at boot.
+  nat_tailscale_cloud_init_by_az = {
+    for az, lines in local.nat_tailscale_conf_by_az : az => {
+      content_type = "text/x-shellscript"
+      content = join("\n", concat(
+        ["#!/bin/sh", "set -eu", "cat >>/etc/fck-nat.conf <<'EOC'"],
+        lines,
+        ["EOC", "service fck-nat restart", ""],
+      ))
+    }
+  }
+}
+
+resource "aws_ssm_parameter" "nat_tailscale_auth_key" {
+  count = local.nat_tailscale_create_ssm ? 1 : 0
+  name  = local.nat_tailscale_auth_key_ssm
+  type  = "SecureString"
+  value = var.stack_pelotech_nat_tailscale_auth_key
+}
+
+resource "aws_iam_role_policy" "nat_tailscale_ssm" {
+  count = local.nat_tailscale_enabled ? length(module.vpc.azs) : 0
+  name  = "${var.stack_name}-nat-tailscale-ssm"
+  role  = module.fck_nat[count.index].role_name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/${trimprefix(local.nat_tailscale_auth_key_ssm, "/")}"
+    }]
+  })
+}
+
 data "aws_ami" "main" {
   count       = var.stack_pelotech_nat_enabled ? 1 : 0
   most_recent = true
@@ -283,6 +339,7 @@ module "fck_nat" {
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
   instance_type       = var.stack_pelotech_nat_instance_type
+  cloud_init_parts    = local.nat_tailscale_enabled ? [local.nat_tailscale_cloud_init_by_az[module.vpc.azs[count.index]]] : []
   update_route_tables = true
   route_tables_ids = {
     private = module.vpc.private_route_table_ids[count.index]

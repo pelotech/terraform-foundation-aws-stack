@@ -177,3 +177,8 @@ output "cni_node_labels_resolved" {
   description = "(introspection) Labels applied to the dedicated CNI node group ({} when not created)."
   value       = local.cni_node_labels
 }
+
+output "nat_tailscale_conf_resolved" {
+  description = "(introspection) Rendered tailscale fck-nat.conf lines per AZ ({} when tailscale is disabled). Only references the SSM parameter name, never the key value."
+  value       = local.nat_tailscale_conf_by_az
+}

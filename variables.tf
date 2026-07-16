@@ -106,6 +106,46 @@ variable "stack_pelotech_nat_instance_type" {
   description = "choose instance based on bandwitch requirements"
 }
 
+variable "stack_pelotech_nat_tailscale" {
+  description = "Tailscale settings for the pelotech NAT instances. Provide auth via auth_key_ssm (name of an existing SSM parameter) or stack_pelotech_nat_tailscale_auth_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module."
+  type = object({
+    enabled            = optional(bool, false)
+    auth_key_ssm       = optional(string, "")
+    advertise_routes   = optional(string, "")
+    exit_node          = optional(bool, false)
+    hostname           = optional(string, "")
+    snat_subnet_routes = optional(bool, true)
+    extra_args         = optional(string, "")
+  })
+  default = {}
+
+  validation {
+    condition     = !var.stack_pelotech_nat_tailscale.enabled || (var.stack_pelotech_nat_tailscale.auth_key_ssm != "") != (var.stack_pelotech_nat_tailscale_auth_key != "")
+    error_message = "When tailscale is enabled, set exactly one of stack_pelotech_nat_tailscale_auth_key or auth_key_ssm."
+  }
+  validation {
+    condition = alltrue([for v in [
+      var.stack_pelotech_nat_tailscale.auth_key_ssm,
+      var.stack_pelotech_nat_tailscale.advertise_routes,
+      var.stack_pelotech_nat_tailscale.hostname,
+      var.stack_pelotech_nat_tailscale.extra_args,
+    ] : !strcontains(v, "\"") && !strcontains(v, "\n")])
+    error_message = "Tailscale settings must not contain double quotes or newlines (values are written as key=\"value\" lines into /etc/fck-nat.conf)."
+  }
+}
+
+variable "stack_pelotech_nat_tailscale_auth_key" {
+  description = "Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer auth_key_ssm with a pre-existing parameter)."
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = !strcontains(var.stack_pelotech_nat_tailscale_auth_key, "\"") && !strcontains(var.stack_pelotech_nat_tailscale_auth_key, "\n")
+    error_message = "Auth key must not contain double quotes or newlines."
+  }
+}
+
 variable "stack_existing_vpc_config" {
   type = object({
     vpc_id     = string
