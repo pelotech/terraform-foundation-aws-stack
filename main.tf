@@ -534,7 +534,7 @@ module "ebs_csi_driver_irsa_role" {
 
 module "s3_csi" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "5.14.1"
+  version = "5.15.1"
   bucket  = "${var.tags.Owner}-${var.name}-csi-bucket"
 
   create_bucket                         = var.s3_csi.create_bucket
