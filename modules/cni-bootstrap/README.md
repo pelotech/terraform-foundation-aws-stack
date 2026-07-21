@@ -54,8 +54,48 @@ record. If you still hit `cannot re-use a name that is still in use` on a repair
 
 - **Release is `failed`/`pending`** (`helm list -A --all`) → set `replace = true`
   for one apply to reclaim the name, or `helm uninstall <name> -n <ns>` then apply.
-- **Release is healthy (`deployed`)** but not in Terraform state → adopt it:
-  `terraform import 'module.cni_bootstrap.helm_release.cni[0]' <namespace>/<name>`.
+- **Release is healthy (`deployed`)** but not in Terraform state → adopt it via
+  import — see the next section.
+
+### Adopting an existing release (migrating from imperative helm install)
+
+Switching a cluster that already installed its CNI out-of-band (the old
+`helm upgrade --install` bootstrap this module replaces) fails on the first
+apply with:
+
+```text
+Error: installation failed
+cannot re-use a name that is still in use
+```
+
+The release name already exists in the cluster, so Terraform's fresh
+`helm install` is refused. **Do not uninstall** (that takes down the CNI) and
+`replace = true` is not the fix (it only reclaims failed/pending/deleted names,
+never a live `deployed` release). Instead, import the existing release into
+state:
+
+```sh
+terraform import 'module.cni_bootstrap.helm_release.cni[0]' <namespace>/<release>
+```
+
+Release names: `cilium`, `kube-ovn`, or your custom chart's name; the namespace
+is `var.namespace` (default `kube-system`) — e.g.
+`terraform import 'module.cni_bootstrap.helm_release.cni[0]' kube-system/kube-ovn`.
+
+The next apply is then a real in-place `helm upgrade` to this module's
+chart/values. Before running it:
+
+- **Values are not carried over.** The upgrade applies chart defaults + this
+  module's `set` list only (no `--reuse-values`). Run
+  `helm get values -n <ns> <release>` and re-pass anything custom via
+  `helm_set` / `helm_values`, or it silently reverts.
+- **Compare chart source and version.** kube-ovn installs
+  `oci://ghcr.io/pelotech/charts/kube-ovn` — if the existing release came from a
+  different chart or version, the upgrade is a real migration, not a no-op.
+- **kube-ovn: master node first.** The upgrade sets
+  `MASTER_NODES_LABEL=kube-ovn/role=master`; make sure the foundation module's
+  dedicated CNI node group is applied and its node registered before this
+  upgrade, or ovn-central is repinned to a selector with no matching nodes.
 
 ### Custom CNI
 

@@ -339,6 +339,12 @@ As a safety net, set `initial_node = { ..., timeouts = { create = "20m" } }` so 
 bring-up fails fast instead of 60m. This replaces the imperative
 `helm upgrade --install` bootstrap step.
 
+> **Migrating an existing cluster** that already installed its CNI via
+> `helm install`? Import the release first or the apply fails with
+> `cannot re-use a name that is still in use` — see
+> ["Adopting an existing release"](modules/cni-bootstrap/README.md#adopting-an-existing-release-migrating-from-imperative-helm-install)
+> in the cni-bootstrap README.
+
 ### Power-user overrides
 
 Pin addon versions or pass addon-specific configuration (e.g. vpc-cni prefix
