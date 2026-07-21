@@ -8,7 +8,7 @@ locals {
       repository   = "https://helm.cilium.io/"
       chart        = "cilium"
       # renovate: datasource=helm depName=cilium registryUrl=https://helm.cilium.io
-      version       = "1.15.6"
+      version       = "1.19.6"
       timeout       = 600
       wait_default  = false # agent bootstraps NotReady nodes; install concurrently
       wait_selector = ""
