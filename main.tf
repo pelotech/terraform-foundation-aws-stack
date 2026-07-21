@@ -95,42 +95,49 @@ locals {
   # CNI profiles: stack_cni selects the taints/labels and vpc-cni/kube-proxy addon
   # enablement appropriate for the chosen CNI. Individual pieces stay overridable
   # (initial_node_taints(_extra)/initial_node_labels(_extra) and the addon toggles).
-  # `system_taints`/`system_labels` apply to the initial/system node group (coredns +
-  # critical addons). `cni_node` (null unless the CNI needs it) describes a dedicated
-  # node group for the CNI's control plane — kube-ovn's ovn-central, which pins to its
-  # master nodes' IPs and so must be recycled (destroy/recreate) rather than rolled.
+  # `system_node` describes the initial/system node group's taints/labels (coredns +
+  # critical addons). `cni_node` (null unless the CNI needs it) describes, with the
+  # same shape, a dedicated node group for the CNI's control plane — kube-ovn's
+  # ovn-central, which pins to its master nodes' IPs and so must be recycled
+  # (destroy/recreate) rather than rolled.
   cni_profiles = {
     cilium = {
-      system_taints = {
-        critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
-        cilium               = { key = "node.cilium.io/agent-not-ready", value = "true", effect = "NO_EXECUTE" }
+      system_node = {
+        taints = {
+          critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+          cilium               = { key = "node.cilium.io/agent-not-ready", value = "true", effect = "NO_EXECUTE" }
+        }
+        labels = {}
       }
-      system_labels           = {}
       cni_node                = null
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = false # cilium kube-proxy replacement
     }
     "kube-ovn" = {
-      system_taints = {
-        critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
-        nidhogg_kube_ovn     = { key = "nidhogg.uswitch.com/kube-system.kube-ovn-pinger", value = "true", effect = "NO_SCHEDULE" }
-        nidhogg_multus       = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
+      system_node = {
+        taints = {
+          critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+          nidhogg_kube_ovn     = { key = "nidhogg.uswitch.com/kube-system.kube-ovn-pinger", value = "true", effect = "NO_SCHEDULE" }
+          nidhogg_multus       = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
+        }
+        labels = {}
       }
-      system_labels = {}
       cni_node = {
-        labels = { "kube-ovn/role" = "master" }
         taints = {
           kube_ovn_control_plane = { key = "kube-ovn.io/control-plane", value = "true", effect = "NO_SCHEDULE" }
         }
+        labels = { "kube-ovn/role" = "master" }
       }
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = true
     }
     "vpc-cni" = {
-      system_taints = {
-        critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+      system_node = {
+        taints = {
+          critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+        }
+        labels = {}
       }
-      system_labels           = {}
       cni_node                = null
       enable_vpc_cni_addon    = true
       enable_kube_proxy_addon = true
@@ -139,8 +146,8 @@ locals {
   cni = local.cni_profiles[var.stack_cni]
 
   # Override model: full-override var wins entirely (null = derive); otherwise preset + _extra merge.
-  initial_taints = var.initial_node_taints != null ? var.initial_node_taints : merge(local.cni.system_taints, var.initial_node_taints_extra)
-  initial_labels = var.initial_node_labels != null ? var.initial_node_labels : merge(local.cni.system_labels, var.initial_node_labels_extra)
+  initial_taints = var.initial_node_taints != null ? var.initial_node_taints : merge(local.cni.system_node.taints, var.initial_node_taints_extra)
+  initial_labels = var.initial_node_labels != null ? var.initial_node_labels : merge(local.cni.system_node.labels, var.initial_node_labels_extra)
 
   # Dedicated CNI node group (kube-ovn control plane): exists only for profiles that
   # define cni_node, and can be toggled off (recycle) via stack_enable_cni_node_group.
