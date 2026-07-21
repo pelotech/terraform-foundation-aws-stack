@@ -1,33 +1,63 @@
-variable "stack_name" {
+variable "initial_node" {
+  description = "Initial (system) managed node group. instance_types is required and must all be one architecture (the node AMI type is derived from them). taints/labels: leave null to derive from the cni profile merged with taints_extra/labels_extra (caller keys win); set to a map to replace the preset entirely ({} for none)."
+  type = object({
+    instance_types = list(string)
+    enabled        = optional(bool, true)
+    min_size       = optional(number, 2)
+    max_size       = optional(number, 6)
+    desired_size   = optional(number, 3)
+    taints         = optional(map(object({ key = string, value = string, effect = string })))
+    taints_extra   = optional(map(object({ key = string, value = string, effect = string })), {})
+    labels         = optional(map(string))
+    labels_extra   = optional(map(string), {})
+    timeouts = optional(object({
+      create = optional(string)
+      update = optional(string)
+      delete = optional(string)
+    }))
+  })
+  nullable = false
+
+  validation {
+    condition     = length(var.initial_node.instance_types) > 0
+    error_message = "initial_node.instance_types must not be empty."
+  }
+  validation {
+    # All types must share one architecture (all Graviton/arm64 or all x86_64),
+    # since the derived ami_type applies to the whole node group.
+    condition     = length(distinct([for t in var.initial_node.instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
+    error_message = "All initial_node.instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
+  }
+  validation {
+    condition     = var.initial_node.min_size >= 0
+    error_message = "initial_node.min_size must be >= 0."
+  }
+}
+
+variable "name" {
   type        = string
   default     = "foundation-stack"
   description = "Name of the stack"
 }
 
-variable "stack_create" {
+variable "create" {
   type        = bool
   default     = true
   description = "should resources be created"
 }
 
-variable "stack_create_pelotech_nat_eip" {
-  type        = bool
-  default     = false
-  description = "should create pelotech nat eip even if NAT isn't enabled - nice for getting ips created for allow lists"
-}
-
-variable "eks_cluster_version" {
+variable "cluster_version" {
   type        = string
   default     = "1.35"
   description = "Kubernetes version to set for the cluster"
 
   validation {
-    condition     = can(regex("^\\d+\\.\\d+$", var.eks_cluster_version))
-    error_message = "eks_cluster_version must be in MAJOR.MINOR form (e.g. \"1.35\")."
+    condition     = can(regex("^\\d+\\.\\d+$", var.cluster_version))
+    error_message = "cluster_version must be in MAJOR.MINOR form (e.g. \"1.35\")."
   }
 }
 
-variable "stack_tags" {
+variable "tags" {
   type = map(string)
   default = {
     Owner       = "pelotech"
@@ -36,126 +66,92 @@ variable "stack_tags" {
   description = "tags to be added to the stack, should at least have Owner and Environment"
 }
 
-variable "stack_cni" {
+variable "cni" {
   type        = string
   default     = "cilium"
-  description = "CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the kube-ovn/role=master label + nidhogg taint move to a dedicated CNI node group (cni_node_* vars), not the system group. Override individual pieces with initial_node_taints(_extra)/initial_node_labels(_extra) and the stack_enable_*_addon toggles."
+  description = "CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the kube-ovn/role=master label + nidhogg taint move to a dedicated CNI node group (the cni_node variable), not the system group. Override individual pieces with initial_node.taints(_extra)/labels(_extra) and the addons toggles."
   validation {
-    condition     = contains(["cilium", "kube-ovn", "vpc-cni"], var.stack_cni)
-    error_message = "stack_cni must be one of: cilium, kube-ovn, vpc-cni."
+    condition     = contains(["cilium", "kube-ovn", "vpc-cni"], var.cni)
+    error_message = "cni must be one of: cilium, kube-ovn, vpc-cni."
   }
 }
 
-variable "stack_enable_vpc_cni_addon" {
-  type        = bool
-  default     = null
-  description = "Override installation of the AWS VPC CNI managed addon. Leave null (default) to derive from stack_cni (on for vpc-cni, off for cilium/kube-ovn). Set true/false to force. When the addon is off, nodeadm maxPods=110 cloudinit is applied automatically."
+variable "addons" {
+  description = "Managed cluster addon toggles and overrides. vpc_cni/kube_proxy: leave null (default) to derive from the cni profile (vpc-cni: on for cni=vpc-cni; kube-proxy: off for cilium kube-proxy replacement); set true/false to force. When the vpc-cni addon is off, nodeadm maxPods=110 cloudinit is applied automatically. overrides: per-addon overrides keyed by addon name (e.g. \"vpc-cni\", \"kube-proxy\", \"coredns\") merged over module defaults — accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map."
+  type = object({
+    vpc_cni    = optional(bool)
+    kube_proxy = optional(bool)
+    coredns    = optional(bool, true)
+    overrides  = optional(any, {})
+  })
+  default  = {}
+  nullable = false
 }
 
-variable "stack_enable_kube_proxy_addon" {
-  type        = bool
-  default     = null
-  description = "Override installation of the kube-proxy managed addon. Leave null (default) to derive from stack_cni (off for cilium kube-proxy replacement, on for kube-ovn/vpc-cni). Set true/false to force."
-}
-
-variable "stack_enable_coredns_addon" {
-  type        = bool
-  default     = true
-  description = "Install coredns as a managed addon. Note: coredns will not schedule until a CNI is running and nodes are Ready."
-}
-
-variable "stack_cluster_addons_overrides" {
-  type        = any
-  default     = {}
-  description = "Per-addon overrides keyed by addon name (e.g. \"vpc-cni\", \"kube-proxy\", \"coredns\"). Merges over module defaults — use for version pinning, vpc-cni prefix delegation, custom networking, etc. Accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map."
-}
-
-variable "stack_enable_cluster_kms" {
+variable "create_cluster_kms" {
   type        = bool
   default     = true
   description = "Should secrets be encrypted by kms in the cluster"
 }
 
-variable "stack_enable_default_eks_managed_node_group" {
-  type        = bool
-  default     = true
-  description = "Ability to disable default node group"
-}
-
-variable "stack_pelotech_nat_enabled" {
-  type        = bool
-  default     = false
-  description = "Use pelotech-nat as NAT instances instead of NAT gateway"
-}
-
-variable "stack_pelotech_nat_ami_owner_id" {
-  type        = string
-  default     = "568608671756"
-  description = "Owner ID to search of ami"
-}
-
-variable "stack_pelotech_nat_ami_name_filter" {
-  type        = string
-  default     = "fck-nat-al2023-hvm-*"
-  description = "ami name filter to find the correct ami"
-}
-
-variable "stack_pelotech_nat_instance_type" {
-  type        = string
-  default     = "t4g.micro"
-  description = "choose instance based on bandwitch requirements"
-}
-
-variable "stack_pelotech_nat_tailscale" {
-  description = "Tailscale settings for the pelotech NAT instances. Provide auth via auth_key_ssm (name of an existing SSM parameter) or stack_pelotech_nat_tailscale_auth_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module."
+variable "pelotech_nat" {
+  description = "Pelotech NAT instances (fck-nat) replacing the managed NAT gateway. create_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. tailscale: provide auth via tailscale.auth_key_ssm (name of an existing SSM parameter) or pelotech_nat_tailscale_auth_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module."
   type = object({
-    enabled            = optional(bool, false)
-    auth_key_ssm       = optional(string, "")
-    advertise_routes   = optional(string, "")
-    exit_node          = optional(bool, false)
-    hostname           = optional(string, "")
-    snat_subnet_routes = optional(bool, true)
-    extra_args         = optional(string, "")
+    enabled         = optional(bool, false)
+    instance_type   = optional(string, "t4g.micro")
+    ami_owner_id    = optional(string, "568608671756")
+    ami_name_filter = optional(string, "fck-nat-al2023-hvm-*")
+    create_eip      = optional(bool, false)
+    tailscale = optional(object({
+      enabled            = optional(bool, false)
+      auth_key_ssm       = optional(string, "")
+      advertise_routes   = optional(string, "")
+      exit_node          = optional(bool, false)
+      hostname           = optional(string, "")
+      snat_subnet_routes = optional(bool, true)
+      extra_args         = optional(string, "")
+    }), {})
   })
-  default = {}
+  default  = {}
+  nullable = false
 
   validation {
-    condition     = !var.stack_pelotech_nat_tailscale.enabled || (var.stack_pelotech_nat_tailscale.auth_key_ssm != "") != (var.stack_pelotech_nat_tailscale_auth_key != "")
-    error_message = "When tailscale is enabled, set exactly one of stack_pelotech_nat_tailscale_auth_key or auth_key_ssm."
+    condition     = !var.pelotech_nat.tailscale.enabled || (var.pelotech_nat.tailscale.auth_key_ssm != "") != (var.pelotech_nat_tailscale_auth_key != "")
+    error_message = "When tailscale is enabled, set exactly one of pelotech_nat_tailscale_auth_key or pelotech_nat.tailscale.auth_key_ssm."
   }
   validation {
     condition = alltrue([for v in [
-      var.stack_pelotech_nat_tailscale.auth_key_ssm,
-      var.stack_pelotech_nat_tailscale.advertise_routes,
-      var.stack_pelotech_nat_tailscale.hostname,
-      var.stack_pelotech_nat_tailscale.extra_args,
+      var.pelotech_nat.tailscale.auth_key_ssm,
+      var.pelotech_nat.tailscale.advertise_routes,
+      var.pelotech_nat.tailscale.hostname,
+      var.pelotech_nat.tailscale.extra_args,
     ] : !strcontains(v, "\"") && !strcontains(v, "\n")])
     error_message = "Tailscale settings must not contain double quotes or newlines (values are written as key=\"value\" lines into /etc/fck-nat.conf)."
   }
 }
 
-variable "stack_pelotech_nat_tailscale_auth_key" {
-  description = "Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer auth_key_ssm with a pre-existing parameter)."
+variable "pelotech_nat_tailscale_auth_key" {
+  description = "Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer pelotech_nat.tailscale.auth_key_ssm with a pre-existing parameter)."
   type        = string
   default     = ""
   sensitive   = true
 
   validation {
-    condition     = !strcontains(var.stack_pelotech_nat_tailscale_auth_key, "\"") && !strcontains(var.stack_pelotech_nat_tailscale_auth_key, "\n")
+    condition     = !strcontains(var.pelotech_nat_tailscale_auth_key, "\"") && !strcontains(var.pelotech_nat_tailscale_auth_key, "\n")
     error_message = "Auth key must not contain double quotes or newlines."
   }
 }
 
-variable "stack_existing_vpc_config" {
+variable "existing_vpc" {
   type = object({
     vpc_id     = string
     subnet_ids = list(string)
   })
   default     = null
-  description = "Setting the VPC"
+  description = "Use an existing VPC instead of creating one (null = create the VPC from the vpc variable)"
 }
 
-variable "stack_vpc_block" {
+variable "vpc" {
   type = object({
     cidr             = string
     azs              = list(string)
@@ -170,7 +166,7 @@ variable "stack_vpc_block" {
     public_subnets   = ["172.16.100.0/24", "172.16.101.0/24", "172.16.102.0/24"]
     database_subnets = ["172.16.200.0/24", "172.16.201.0/24", "172.16.202.0/24"]
   }
-  description = "Variables for defining the vpc for the stack"
+  description = "Variables for defining the vpc for the stack (ignored when existing_vpc is set)"
 }
 
 variable "extra_access_entries" {
@@ -208,153 +204,53 @@ variable "extra_access_entries" {
   }
 }
 
-variable "stack_admin_arns" {
-  type        = list(string)
-  default     = []
-  description = "arn to the roles for the cluster admins role"
-}
-
-variable "stack_admin_ro_arns" {
-  type        = list(string)
-  default     = []
-  description = "arn to the roles for the cluster admin read only role with secret and configmap, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries"
-}
-
-variable "stack_ro_arns" {
-  type        = list(string)
-  default     = []
-  description = "arn to the roles for the cluster read only role, these will also have KMS readonly access for CI plan purposes, more limited access should use the extra entries"
-}
-
-variable "initial_node_taints" {
-  type        = map(object({ key = string, value = string, effect = string }))
-  default     = null
-  description = "Full override of the initial managed node group taints. Leave null (default) to derive from stack_cni merged with initial_node_taints_extra. Set to a map to replace the CNI preset entirely (use {} for no taints)."
-}
-
-variable "initial_node_taints_extra" {
-  type        = map(object({ key = string, value = string, effect = string }))
-  default     = {}
-  description = "Extra taints merged over the stack_cni preset for the initial managed node group (caller keys win). Ignored when initial_node_taints is set."
-}
-
-variable "initial_node_labels" {
-  type        = map(string)
-  default     = null
-  description = "Full override of the initial managed node group labels. Leave null (default) to derive from stack_cni merged with initial_node_labels_extra. Set to a map to replace the CNI preset entirely (use {} for no labels)."
-}
-
-variable "initial_node_labels_extra" {
-  type        = map(string)
-  default     = {}
-  description = "Extra labels merged over the stack_cni preset for the initial managed node group (caller keys win). Ignored when initial_node_labels is set."
-}
-
-variable "initial_instance_types" {
-  type        = list(string)
-  description = "instance types of the initial managed node group (must all be the same architecture; the node AMI type is derived from them)"
-
-  validation {
-    condition     = length(var.initial_instance_types) > 0
-    error_message = "initial_instance_types must not be empty."
-  }
-  validation {
-    # All types must share one architecture (all Graviton/arm64 or all x86_64),
-    # since the derived ami_type applies to the whole node group.
-    condition     = length(distinct([for t in var.initial_instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
-    error_message = "All initial_instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
-  }
+variable "access" {
+  description = "IAM role ARNs granted cluster access. admin_arns: cluster admins. admin_ro_arns: admin read only with secret and configmap access. ro_arns: read only. Both *_ro groups also get KMS readonly access for CI plan purposes; more limited access should use extra_access_entries."
+  type = object({
+    admin_arns    = optional(list(string), [])
+    admin_ro_arns = optional(list(string), [])
+    ro_arns       = optional(list(string), [])
+  })
+  default  = {}
+  nullable = false
 }
 
 # --- Dedicated CNI node group (kube-ovn control plane) ---
 # For CNIs whose control plane is pinned to specific master nodes (kube-ovn's
 # ovn-central), a small dedicated node group hosts it so upgrades recycle it
 # WITHOUT draining the initial/system group (coredns + critical addons stay up).
-# Created by default only for stack_cni = "kube-ovn".
+# Created by default only for cni = "kube-ovn".
 
-variable "stack_enable_cni_node_group" {
-  type        = bool
-  default     = null
-  description = "Create the dedicated CNI node group (kube-ovn control plane). null derives from stack_cni (true for kube-ovn, false otherwise). Set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group."
-}
-
-variable "cni_node_kubernetes_version" {
-  type        = string
-  default     = null
-  description = "Kubernetes version the dedicated CNI node group runs — bump this to upgrade it. Decoupled from eks_cluster_version so a control-plane bump doesn't auto-roll it. null follows eks_cluster_version. REQUIRED for stack_cni=\"kube-ovn\" so a control-plane bump never auto-rolls the master node (deadlock); replace it deliberately via the recycle (toggle stack_enable_cni_node_group + bump cni-bootstrap's bootstrap_generation)."
-
-  validation {
-    condition     = var.stack_cni != "kube-ovn" || var.cni_node_kubernetes_version != null
-    error_message = "cni_node_kubernetes_version must be set when stack_cni = \"kube-ovn\" so a control-plane version bump does not auto-roll the CNI master node (kube-ovn deadlock). Set it to the current node k8s version, then bump it deliberately during a recycle."
-  }
-}
-
-variable "cni_node_instance_types" {
-  type        = list(string)
-  default     = null
-  description = "Instance types for the dedicated CNI node group. null falls back to initial_instance_types. Must all be one architecture (the AMI type is derived from them)."
-
-  validation {
-    condition     = var.cni_node_instance_types == null || length(distinct([for t in var.cni_node_instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
-    error_message = "All cni_node_instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
-  }
-}
-
-variable "cni_node_ami_release_version" {
-  type        = string
-  default     = null
-  description = "Pin the dedicated CNI node group's AMI release version (e.g. for a same-version security patch). null uses the default AMI for its kubernetes_version. Bump it (with stack_enable_cni_node_group toggled) to recycle onto a patched AMI."
-}
-
-variable "cni_node_size" {
-  type        = number
-  default     = 1
-  description = "Number of nodes in the dedicated CNI node group (min=max=desired). Default 1 = a single kube-ovn ovn-central master."
-}
-
-variable "initial_node_timeouts" {
+variable "cni_node" {
+  description = "Dedicated CNI node group (kube-ovn control plane). enabled: null derives from cni (true for kube-ovn, false otherwise); set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group. kubernetes_version: version this group runs — bump to upgrade it; decoupled from cluster_version so a control-plane bump doesn't auto-roll it (null follows cluster_version, REQUIRED for cni=\"kube-ovn\"); replace it deliberately via the recycle (toggle enabled + bump cni-bootstrap's bootstrap_generation). instance_types: null falls back to initial_node.instance_types; must all be one architecture. ami_release_version: pin the AMI release (e.g. a same-version security patch); null uses the default AMI for its kubernetes_version. size: node count (min=max=desired); default 1 = a single kube-ovn ovn-central master."
   type = object({
-    create = optional(string)
-    update = optional(string)
-    delete = optional(string)
+    enabled             = optional(bool)
+    kubernetes_version  = optional(string)
+    instance_types      = optional(list(string))
+    ami_release_version = optional(string)
+    size                = optional(number, 1)
   })
-  default     = null
-  description = "Timeouts for the initial managed node group's create/update/delete. null uses the AWS provider default (60m create). Set e.g. { create = \"20m\" } to fail fast when a CNI-less cluster's nodes never reach Ready."
-}
-
-variable "initial_node_min_size" {
-  type        = number
-  default     = 2
-  description = "minimum size of the initial managed node group"
+  default  = {}
+  nullable = false
 
   validation {
-    condition     = var.initial_node_min_size >= 0
-    error_message = "initial_node_min_size must be >= 0."
+    condition     = var.cni != "kube-ovn" || var.cni_node.kubernetes_version != null
+    error_message = "cni_node.kubernetes_version must be set when cni = \"kube-ovn\" so a control-plane version bump does not auto-roll the CNI master node (kube-ovn deadlock). Set it to the current node k8s version, then bump it deliberately during a recycle."
+  }
+  validation {
+    condition     = var.cni_node.instance_types == null || length(distinct([for t in var.cni_node.instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
+    error_message = "All cni_node.instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
   }
 }
 
-variable "initial_node_max_size" {
-  type        = number
-  default     = 6
-  description = "max size of the initial managed node group"
-}
-
-variable "initial_node_desired_size" {
-  type        = number
-  default     = 3
-  description = "desired size of the initial managed node group"
-}
-
-variable "s3_csi_driver_create_bucket" {
-  type        = bool
-  default     = true
-  description = "create a new bucket for use with the s3 CSI driver"
-}
-
-variable "s3_csi_driver_bucket_arns" {
-  type        = list(string)
-  default     = []
-  description = "existing buckets the s3 CSI driver should have access to"
+variable "s3_csi" {
+  description = "S3 CSI driver bucket access. create_bucket: create a new bucket for use with the driver. bucket_arns: existing buckets the driver should have access to."
+  type = object({
+    create_bucket = optional(bool, true)
+    bucket_arns   = optional(list(string), [])
+  })
+  default  = {}
+  nullable = false
 }
 
 variable "vpc_endpoints" {

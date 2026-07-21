@@ -56,7 +56,7 @@ output "region" {
 }
 
 output "vpc_endpoint_ids" {
-  description = "Map of created VPC endpoint ids (empty when stack_enable_vpc_endpoints is false)."
+  description = "Map of created VPC endpoint ids (empty when vpc_endpoints is empty)."
   value       = try(module.vpc_endpoints[0].endpoints, {})
 }
 
@@ -149,17 +149,17 @@ output "karpenter_role_arn" {
 # CNI profile (resolved)
 ################################################################################
 output "initial_node_taints_resolved" {
-  description = "(introspection) Taints applied to the initial managed node group after resolving stack_cni, initial_node_taints, and initial_node_taints_extra"
+  description = "(introspection) Taints applied to the initial managed node group after resolving cni and initial_node.taints(_extra)"
   value       = local.initial_taints
 }
 
 output "initial_node_labels_resolved" {
-  description = "(introspection) Labels applied to the initial managed node group after resolving stack_cni, initial_node_labels, and initial_node_labels_extra"
+  description = "(introspection) Labels applied to the initial managed node group after resolving cni and initial_node.labels(_extra)"
   value       = local.initial_labels
 }
 
 output "cluster_addons_enabled_resolved" {
-  description = "(introspection) Managed addon enablement after resolving stack_cni and the stack_enable_*_addon overrides"
+  description = "(introspection) Managed addon enablement after resolving cni and the addons.* overrides"
   value       = local.cluster_addons_enabled
 }
 

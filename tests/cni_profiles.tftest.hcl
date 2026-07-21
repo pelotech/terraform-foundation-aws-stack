@@ -1,4 +1,4 @@
-# Validates that stack_cni drives the initial node group taints/labels and the
+# Validates that cni drives the initial node group taints/labels and the
 # vpc-cni/kube-proxy addon enablement, and that the override escape hatches win.
 # Uses a mocked AWS provider so no credentials, state, or live cluster are needed.
 
@@ -37,7 +37,7 @@ mock_provider "aws" {
 }
 
 variables {
-  initial_instance_types = ["m5.large"]
+  initial_node = { instance_types = ["m5.large"] }
 }
 
 run "default_is_cilium" {
@@ -69,8 +69,8 @@ run "kube_ovn_profile" {
   command = plan
 
   variables {
-    stack_cni                   = "kube-ovn"
-    cni_node_kubernetes_version = "1.35"
+    cni      = "kube-ovn"
+    cni_node = { kubernetes_version = "1.35" }
   }
 
   # Initial/system group: only CriticalAddonsOnly — the master label + nidhogg taint
@@ -102,18 +102,18 @@ run "kube_ovn_requires_pinned_cni_node_version" {
   command = plan
 
   variables {
-    stack_cni = "kube-ovn"
-    # cni_node_kubernetes_version intentionally unset
+    cni = "kube-ovn"
+    # cni_node.kubernetes_version intentionally unset
   }
 
-  expect_failures = [var.cni_node_kubernetes_version]
+  expect_failures = [var.cni_node]
 }
 
 run "vpc_cni_profile" {
   command = plan
 
   variables {
-    stack_cni = "vpc-cni"
+    cni = "vpc-cni"
   }
 
   assert {
@@ -134,15 +134,19 @@ run "taints_extra_merges_over_preset" {
   command = plan
 
   variables {
-    stack_cni = "cilium"
-    initial_node_taints_extra = {
-      spot = { key = "spot", value = "true", effect = "NO_SCHEDULE" }
+    cni = "cilium"
+    # run-level variables replace whole values (no deep merge), so restate instance_types
+    initial_node = {
+      instance_types = ["m5.large"]
+      taints_extra = {
+        spot = { key = "spot", value = "true", effect = "NO_SCHEDULE" }
+      }
     }
   }
 
   assert {
     condition     = length(output.initial_node_taints_resolved) == 3 && output.initial_node_taints_resolved["spot"].key == "spot"
-    error_message = "initial_node_taints_extra must merge over the cilium preset (critical + cilium + spot)"
+    error_message = "initial_node.taints_extra must merge over the cilium preset (critical + cilium + spot)"
   }
 }
 
@@ -150,19 +154,22 @@ run "full_override_replaces_preset" {
   command = plan
 
   variables {
-    stack_cni = "cilium"
-    initial_node_taints = {
-      only = { key = "only", value = "true", effect = "NO_SCHEDULE" }
-    }
-    # extra is ignored when the full override is set
-    initial_node_taints_extra = {
-      ignored = { key = "ignored", value = "true", effect = "NO_SCHEDULE" }
+    cni = "cilium"
+    initial_node = {
+      instance_types = ["m5.large"]
+      taints = {
+        only = { key = "only", value = "true", effect = "NO_SCHEDULE" }
+      }
+      # extra is ignored when the full override is set
+      taints_extra = {
+        ignored = { key = "ignored", value = "true", effect = "NO_SCHEDULE" }
+      }
     }
   }
 
   assert {
     condition     = length(output.initial_node_taints_resolved) == 1 && contains(keys(output.initial_node_taints_resolved), "only")
-    error_message = "initial_node_taints must fully replace the preset and ignore _extra"
+    error_message = "initial_node.taints must fully replace the preset and ignore taints_extra"
   }
 }
 
@@ -170,13 +177,31 @@ run "addon_toggle_override_wins" {
   command = plan
 
   variables {
-    stack_cni                     = "cilium"
-    stack_enable_kube_proxy_addon = true
+    cni    = "cilium"
+    addons = { kube_proxy = true }
   }
 
   assert {
     condition     = output.cluster_addons_enabled_resolved["kube-proxy"] == true
-    error_message = "explicit stack_enable_kube_proxy_addon must override the cilium-derived default"
+    error_message = "explicit addons.kube_proxy must override the cilium-derived default"
+  }
+}
+
+run "addon_overrides_merge_over_defaults" {
+  command = plan
+
+  variables {
+    addons = {
+      kube_proxy = true
+      overrides = {
+        "kube-proxy" = { most_recent = false, addon_version = "v1.35.0-eksbuild.1" }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.cluster_addons_enabled_resolved["kube-proxy"] == true
+    error_message = "addons.overrides (heterogeneous any value) must be accepted alongside the enable toggles"
   }
 }
 

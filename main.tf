@@ -3,62 +3,46 @@ data "aws_caller_identity" "current" {}
 
 check "initial_node_group_sizing" {
   assert {
-    condition     = var.initial_node_min_size <= var.initial_node_desired_size && var.initial_node_desired_size <= var.initial_node_max_size
-    error_message = "initial_node sizes must satisfy: min (${var.initial_node_min_size}) <= desired (${var.initial_node_desired_size}) <= max (${var.initial_node_max_size})."
+    condition     = var.initial_node.min_size <= var.initial_node.desired_size && var.initial_node.desired_size <= var.initial_node.max_size
+    error_message = "initial_node sizes must satisfy: min (${var.initial_node.min_size}) <= desired (${var.initial_node.desired_size}) <= max (${var.initial_node.max_size})."
   }
 }
 
 locals {
   permissions_boundary_arn = var.permissions_boundary != "" ? "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}" : null
-  is_arm                   = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.stack_pelotech_nat_instance_type))
+  is_arm                   = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.pelotech_nat.instance_type))
   # Derive the node AMI arch from the requested instance types (Graviton family
   # names carry a "g", e.g. m7g/c6gd/t4g). Same detection as is_arm above; the
-  # a1 family (no "g") is not detected. initial_instance_types validates arch
+  # a1 family (no "g") is not detected. initial_node.instance_types validates arch
   # agreement, so index [0] is representative.
-  initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_instance_types[0]))
-  admin_access_entries = {
-    for index, item in var.stack_admin_arns : "admin_${index}" => {
-      principal_arn = item
-      policy_associations = {
-        cluster_admin = {
-          policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-          access_scope = {
-            type = "cluster"
+  initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_node.instance_types[0]))
+  # One expansion for the three managed access groups. The map keys ("admin_0",
+  # "admin_ro_0", "ro_0", ...) and association keys are state addresses inside the
+  # EKS module's for_each — keep them stable to avoid access-entry churn.
+  access_entry_groups = {
+    admin    = { arns = var.access.admin_arns, assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
+    admin_ro = { arns = var.access.admin_ro_arns, assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
+    ro       = { arns = var.access.ro_arns, assoc_key = "view_only", policy = "AmazonEKSViewPolicy" }
+  }
+  managed_access_entries = merge([
+    for group, cfg in local.access_entry_groups : {
+      for index, arn in cfg.arns : "${group}_${index}" => {
+        principal_arn = arn
+        policy_associations = {
+          (cfg.assoc_key) = {
+            policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/${cfg.policy}"
+            access_scope = {
+              type = "cluster"
+            }
           }
         }
       }
     }
-  }
-  ro_access_entries = {
-    for index, item in var.stack_ro_arns : "ro_${index}" => {
-      principal_arn = item
-      policy_associations = {
-        view_only = {
-          policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
-  admin_ro_access_entries = {
-    for index, item in var.stack_admin_ro_arns : "admin_ro_${index}" => {
-      principal_arn = item
-      policy_associations = {
-        admin_view_only = {
-          policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy"
-          access_scope = {
-            type = "cluster"
-          }
-        }
-      }
-    }
-  }
+  ]...)
   extra_access_entries = {
     for index, item in var.extra_access_entries : "extra_${index}" => item
   }
-  s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi_driver_bucket_arns))
+  s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 
   # OVERWRITE on create lets AWS adopt any pre-existing self-managed daemonsets into the managed-addons API.
   # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately.
@@ -92,9 +76,9 @@ locals {
       })
     }
   }
-  # CNI profiles: stack_cni selects the taints/labels and vpc-cni/kube-proxy addon
+  # CNI profiles: var.cni selects the taints/labels and vpc-cni/kube-proxy addon
   # enablement appropriate for the chosen CNI. Individual pieces stay overridable
-  # (initial_node_taints(_extra)/initial_node_labels(_extra) and the addon toggles).
+  # (initial_node.taints(_extra)/labels(_extra) and the addons toggles).
   # `system_node` describes the initial/system node group's taints/labels (coredns +
   # critical addons). `cni_node` (null unless the CNI needs it) describes, with the
   # same shape, a dedicated node group for the CNI's control plane — kube-ovn's
@@ -143,18 +127,18 @@ locals {
       enable_kube_proxy_addon = true
     }
   }
-  cni = local.cni_profiles[var.stack_cni]
+  cni_profile = local.cni_profiles[var.cni]
 
   # Override model: full-override var wins entirely (null = derive); otherwise preset + _extra merge.
-  initial_taints = var.initial_node_taints != null ? var.initial_node_taints : merge(local.cni.system_node.taints, var.initial_node_taints_extra)
-  initial_labels = var.initial_node_labels != null ? var.initial_node_labels : merge(local.cni.system_node.labels, var.initial_node_labels_extra)
+  initial_taints = var.initial_node.taints != null ? var.initial_node.taints : merge(local.cni_profile.system_node.taints, var.initial_node.taints_extra)
+  initial_labels = var.initial_node.labels != null ? var.initial_node.labels : merge(local.cni_profile.system_node.labels, var.initial_node.labels_extra)
 
   # Dedicated CNI node group (kube-ovn control plane): exists only for profiles that
-  # define cni_node, and can be toggled off (recycle) via stack_enable_cni_node_group.
-  enable_cni_node_group   = local.cni.cni_node != null && coalesce(var.stack_enable_cni_node_group, true)
-  cni_node_taints         = try(local.cni.cni_node.taints, {})
-  cni_node_labels         = try(local.cni.cni_node.labels, {})
-  cni_node_instance_types = coalesce(var.cni_node_instance_types, var.initial_instance_types)
+  # define cni_node, and can be toggled off (recycle) via var.cni_node.enabled.
+  enable_cni_node_group   = local.cni_profile.cni_node != null && coalesce(var.cni_node.enabled, true)
+  cni_node_taints         = try(local.cni_profile.cni_node.taints, {})
+  cni_node_labels         = try(local.cni_profile.cni_node.labels, {})
+  cni_node_instance_types = coalesce(var.cni_node.instance_types, var.initial_node.instance_types)
   cni_node_is_arm         = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", local.cni_node_instance_types[0]))
 
   # Settings shared by both managed node groups (per-group bits merged on top below).
@@ -183,21 +167,21 @@ locals {
     cloudinit_pre_nodeadm        = local.enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm
     pre_bootstrap_user_data      = var.pre_bootstrap_user_data
     iam_role_additional_policies = var.node_iam_additional_policies
-    timeouts                     = var.initial_node_timeouts
+    timeouts                     = var.initial_node.timeouts
   }
 
   # Addon toggles: explicit bool wins; null = derive from CNI profile.
-  enable_vpc_cni_addon    = var.stack_enable_vpc_cni_addon != null ? var.stack_enable_vpc_cni_addon : local.cni.enable_vpc_cni_addon
-  enable_kube_proxy_addon = var.stack_enable_kube_proxy_addon != null ? var.stack_enable_kube_proxy_addon : local.cni.enable_kube_proxy_addon
+  enable_vpc_cni_addon    = var.addons.vpc_cni != null ? var.addons.vpc_cni : local.cni_profile.enable_vpc_cni_addon
+  enable_kube_proxy_addon = var.addons.kube_proxy != null ? var.addons.kube_proxy : local.cni_profile.enable_kube_proxy_addon
 
   cluster_addons_enabled = {
     "vpc-cni"    = local.enable_vpc_cni_addon
     "kube-proxy" = local.enable_kube_proxy_addon
-    "coredns"    = var.stack_enable_coredns_addon
+    "coredns"    = var.addons.coredns
   }
   cluster_addons = {
     for name, enabled in local.cluster_addons_enabled : name =>
-    merge(local.cluster_addon_defaults[name], try(var.stack_cluster_addons_overrides[name], {}))
+    merge(local.cluster_addon_defaults[name], try(var.addons.overrides[name], {}))
     if enabled
   }
 
@@ -221,17 +205,17 @@ locals {
 module "vpc" {
   source                                 = "terraform-aws-modules/vpc/aws"
   version                                = "6.6.1"
-  name                                   = var.stack_name
-  create_vpc                             = var.stack_existing_vpc_config == null
+  name                                   = var.name
+  create_vpc                             = var.existing_vpc == null
   enable_dns_hostnames                   = "true"
   enable_dns_support                     = "true"
-  enable_nat_gateway                     = var.stack_pelotech_nat_enabled != true
-  one_nat_gateway_per_az                 = var.stack_pelotech_nat_enabled != true
-  cidr                                   = var.stack_vpc_block.cidr
-  azs                                    = var.stack_vpc_block.azs
-  private_subnets                        = var.stack_vpc_block.private_subnets
-  public_subnets                         = var.stack_vpc_block.public_subnets
-  database_subnets                       = var.stack_vpc_block.database_subnets
+  enable_nat_gateway                     = var.pelotech_nat.enabled != true
+  one_nat_gateway_per_az                 = var.pelotech_nat.enabled != true
+  cidr                                   = var.vpc.cidr
+  azs                                    = var.vpc.azs
+  private_subnets                        = var.vpc.private_subnets
+  public_subnets                         = var.vpc.public_subnets
+  database_subnets                       = var.vpc.database_subnets
   create_database_subnet_group           = true
   create_database_subnet_route_table     = true
   create_database_internet_gateway_route = true
@@ -240,30 +224,30 @@ module "vpc" {
     "kubernetes.io/role/elb" = 1
   }
   private_subnet_tags = {
-    "karpenter.sh/discovery"          = var.stack_name
+    "karpenter.sh/discovery"          = var.name
     "kubernetes.io/role/internal-elb" = 1
   }
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
 locals {
-  nat_tailscale_enabled = var.stack_pelotech_nat_enabled && var.stack_pelotech_nat_tailscale.enabled
+  nat_tailscale_enabled = var.pelotech_nat.enabled && var.pelotech_nat.tailscale.enabled
   # Module creates the SSM parameter when a plain key is supplied
-  nat_tailscale_create_ssm = local.nat_tailscale_enabled && var.stack_pelotech_nat_tailscale_auth_key != ""
+  nat_tailscale_create_ssm = local.nat_tailscale_enabled && var.pelotech_nat_tailscale_auth_key != ""
   # Effective SSM parameter name - the XOR validation on the variable guarantees exactly one source
-  nat_tailscale_auth_key_ssm  = var.stack_pelotech_nat_tailscale.auth_key_ssm != "" ? var.stack_pelotech_nat_tailscale.auth_key_ssm : "/${var.stack_name}/nat/tailscale-auth-key"
-  nat_tailscale_hostname_base = var.stack_pelotech_nat_tailscale.hostname != "" ? var.stack_pelotech_nat_tailscale.hostname : var.stack_name
+  nat_tailscale_auth_key_ssm  = var.pelotech_nat.tailscale.auth_key_ssm != "" ? var.pelotech_nat.tailscale.auth_key_ssm : "/${var.name}/nat/tailscale-auth-key"
+  nat_tailscale_hostname_base = var.pelotech_nat.tailscale.hostname != "" ? var.pelotech_nat.tailscale.hostname : var.name
 
   nat_tailscale_conf_by_az = local.nat_tailscale_enabled ? {
     for az in module.vpc.azs : az => compact([
       "tailscale_enabled=\"true\"",
       "tailscale_auth_key_ssm=\"${local.nat_tailscale_auth_key_ssm}\"",
-      var.stack_pelotech_nat_tailscale.advertise_routes != "" ? "tailscale_advertise_routes=\"${var.stack_pelotech_nat_tailscale.advertise_routes}\"" : "",
-      var.stack_pelotech_nat_tailscale.exit_node ? "tailscale_exit_node=\"true\"" : "",
+      var.pelotech_nat.tailscale.advertise_routes != "" ? "tailscale_advertise_routes=\"${var.pelotech_nat.tailscale.advertise_routes}\"" : "",
+      var.pelotech_nat.tailscale.exit_node ? "tailscale_exit_node=\"true\"" : "",
       "tailscale_hostname=\"${local.nat_tailscale_hostname_base}-${az}\"",
-      var.stack_pelotech_nat_tailscale.snat_subnet_routes ? "" : "tailscale_snat_subnet_routes=\"false\"",
-      var.stack_pelotech_nat_tailscale.extra_args != "" ? "tailscale_extra_args=\"${var.stack_pelotech_nat_tailscale.extra_args}\"" : "",
+      var.pelotech_nat.tailscale.snat_subnet_routes ? "" : "tailscale_snat_subnet_routes=\"false\"",
+      var.pelotech_nat.tailscale.extra_args != "" ? "tailscale_extra_args=\"${var.pelotech_nat.tailscale.extra_args}\"" : "",
     ])
   } : {}
 
@@ -286,12 +270,12 @@ resource "aws_ssm_parameter" "nat_tailscale_auth_key" {
   count = local.nat_tailscale_create_ssm ? 1 : 0
   name  = local.nat_tailscale_auth_key_ssm
   type  = "SecureString"
-  value = var.stack_pelotech_nat_tailscale_auth_key
+  value = var.pelotech_nat_tailscale_auth_key
 }
 
 resource "aws_iam_role_policy" "nat_tailscale_ssm" {
   count = local.nat_tailscale_enabled ? length(module.vpc.azs) : 0
-  name  = "${var.stack_name}-nat-tailscale-ssm"
+  name  = "${var.name}-nat-tailscale-ssm"
   role  = module.fck_nat[count.index].role_name
   policy = jsonencode({
     Version = "2012-10-17"
@@ -304,12 +288,12 @@ resource "aws_iam_role_policy" "nat_tailscale_ssm" {
 }
 
 data "aws_ami" "main" {
-  count       = var.stack_pelotech_nat_enabled ? 1 : 0
+  count       = var.pelotech_nat.enabled ? 1 : 0
   most_recent = true
-  owners      = [var.stack_pelotech_nat_ami_owner_id]
+  owners      = [var.pelotech_nat.ami_owner_id]
   filter {
     name   = "name"
-    values = [var.stack_pelotech_nat_ami_name_filter]
+    values = [var.pelotech_nat.ami_name_filter]
   }
 
   filter {
@@ -328,25 +312,25 @@ data "aws_ami" "main" {
 }
 
 resource "aws_eip" "main" {
-  count = (var.stack_pelotech_nat_enabled || var.stack_create_pelotech_nat_eip) ? length(module.vpc.azs) : 0
+  count = (var.pelotech_nat.enabled || var.pelotech_nat.create_eip) ? length(module.vpc.azs) : 0
   tags = {
-    Name = "nat-${var.stack_name}-${count.index}"
+    Name = "nat-${var.name}-${count.index}"
   }
 }
 
 module "fck_nat" {
   source             = "RaJiska/fck-nat/aws"
   version            = "1.6.0"
-  count              = var.stack_pelotech_nat_enabled ? length(module.vpc.azs) : 0
+  count              = var.pelotech_nat.enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
-  name               = "${var.stack_name}-${module.vpc.azs[count.index]}"
+  name               = "${var.name}-${module.vpc.azs[count.index]}"
   ami_id             = data.aws_ami.main[0].id
   vpc_id             = module.vpc.vpc_id
   subnet_id          = module.vpc.public_subnets[count.index]
   # TODO: look to enable agent/spot
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
-  instance_type       = var.stack_pelotech_nat_instance_type
+  instance_type       = var.pelotech_nat.instance_type
   cloud_init_parts    = local.nat_tailscale_enabled ? [local.nat_tailscale_cloud_init_by_az[module.vpc.azs[count.index]]] : []
   update_route_tables = true
   route_tables_ids = {
@@ -354,7 +338,7 @@ module "fck_nat" {
   }
 
   tags = {
-    Name = "${var.stack_name}-${module.vpc.azs[count.index]}"
+    Name = "${var.name}-${module.vpc.azs[count.index]}"
   }
 }
 
@@ -368,12 +352,12 @@ data "aws_region" "current" {}
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
   version = "6.6.1"
-  count   = var.stack_existing_vpc_config == null && length(var.vpc_endpoints) > 0 ? 1 : 0
+  count   = var.existing_vpc == null && length(var.vpc_endpoints) > 0 ? 1 : 0
 
   vpc_id = module.vpc.vpc_id
 
   create_security_group      = true
-  security_group_name_prefix = "${var.stack_name}-vpce-"
+  security_group_name_prefix = "${var.name}-vpce-"
   security_group_rules = {
     https_from_vpc = {
       type        = "ingress"
@@ -404,40 +388,40 @@ module "vpc_endpoints" {
     },
   )
 
-  tags = var.stack_tags
+  tags = var.tags
 }
 
 module "eks" {
   source                        = "terraform-aws-modules/eks/aws"
   version                       = "21.24.0"
-  name                          = var.stack_name
-  kubernetes_version            = var.eks_cluster_version
-  create                        = var.stack_create
+  name                          = var.name
+  kubernetes_version            = var.cluster_version
+  create                        = var.create
   create_node_security_group    = var.create_node_security_group
   iam_role_permissions_boundary = local.permissions_boundary_arn
   endpoint_private_access       = true
   endpoint_public_access        = var.cluster_endpoint_public_access
   enabled_log_types             = var.cluster_enabled_log_types
-  vpc_id                        = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.vpc_id : module.vpc.vpc_id
-  subnet_ids                    = var.stack_existing_vpc_config != null ? var.stack_existing_vpc_config.subnet_ids : module.vpc.private_subnets
+  vpc_id                        = var.existing_vpc != null ? var.existing_vpc.vpc_id : module.vpc.vpc_id
+  subnet_ids                    = var.existing_vpc != null ? var.existing_vpc.subnet_ids : module.vpc.private_subnets
   addons                        = local.cluster_addons
-  create_kms_key                = var.stack_enable_cluster_kms
+  create_kms_key                = var.create_cluster_kms
   enable_irsa                   = true
-  encryption_config = var.stack_enable_cluster_kms ? {
+  encryption_config = var.create_cluster_kms ? {
     "resources" : [
       "secrets"
     ]
   } : {}
-  kms_key_administrators = var.stack_enable_cluster_kms ? concat(var.stack_admin_arns, var.stack_admin_ro_arns) : []
+  kms_key_administrators = var.create_cluster_kms ? concat(var.access.admin_arns, var.access.admin_ro_arns) : []
   eks_managed_node_groups = merge(
     # Initial / system group (coredns + critical addons). Follows the control-plane
     # version and rolls in place on upgrade.
-    var.stack_enable_default_eks_managed_node_group ? {
-      "initial-${var.stack_name}" = merge(local.node_group_common, {
-        instance_types = var.initial_instance_types
-        min_size       = var.initial_node_min_size
-        max_size       = var.initial_node_max_size
-        desired_size   = var.initial_node_desired_size
+    var.initial_node.enabled ? {
+      "initial-${var.name}" = merge(local.node_group_common, {
+        instance_types = var.initial_node.instance_types
+        min_size       = var.initial_node.min_size
+        max_size       = var.initial_node.max_size
+        desired_size   = var.initial_node.desired_size
         ami_type       = local.initial_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
         labels         = local.initial_labels
         taints         = local.initial_taints
@@ -446,25 +430,25 @@ module "eks" {
     # Dedicated CNI control-plane group (kube-ovn). Version-pinned and recycled
     # (destroy/recreate) on upgrade so the initial group + coredns are untouched.
     local.enable_cni_node_group ? {
-      "cni-${var.stack_name}" = merge(local.node_group_common, {
+      "cni-${var.name}" = merge(local.node_group_common, {
         instance_types      = local.cni_node_instance_types
-        min_size            = var.cni_node_size
-        max_size            = var.cni_node_size
-        desired_size        = var.cni_node_size
-        kubernetes_version  = coalesce(var.cni_node_kubernetes_version, var.eks_cluster_version)
-        ami_release_version = var.cni_node_ami_release_version
+        min_size            = var.cni_node.size
+        max_size            = var.cni_node.size
+        desired_size        = var.cni_node.size
+        kubernetes_version  = coalesce(var.cni_node.kubernetes_version, var.cluster_version)
+        ami_release_version = var.cni_node.ami_release_version
         ami_type            = local.cni_node_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
         labels              = local.cni_node_labels
         taints              = local.cni_node_taints
       })
     } : {},
   )
-  access_entries = merge(local.admin_access_entries, local.ro_access_entries, local.admin_ro_access_entries, local.extra_access_entries)
-  tags = merge(var.stack_tags, {
+  access_entries = merge(local.managed_access_entries, local.extra_access_entries)
+  tags = merge(var.tags, {
     # NOTE - if creating multiple security groups with this module, only tag the
     # security group that Karpenter should utilize with the following tag
     # (i.e. - at most, only one security group should have this tag in your account)
-    "karpenter.sh/discovery" = var.stack_name
+    "karpenter.sh/discovery" = var.name
   })
 }
 data "aws_iam_policy_document" "source" { # allow usage with irsa
@@ -487,21 +471,21 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
   }
 }
 module "karpenter" {
-  count                                   = var.stack_create ? 1 : 0
+  count                                   = var.create ? 1 : 0
   source                                  = "terraform-aws-modules/eks/aws//modules/karpenter"
   version                                 = "21.24.0"
   enable_inline_policy                    = true
   cluster_name                            = module.eks.cluster_name
-  queue_name                              = var.stack_name
-  node_iam_role_name                      = "KarpenterNodeRole-${var.stack_name}"
-  iam_role_name                           = "${var.stack_name}-karpenter-role"
+  queue_name                              = var.name
+  node_iam_role_name                      = "KarpenterNodeRole-${var.name}"
+  iam_role_name                           = "${var.name}-karpenter-role"
   iam_role_use_name_prefix                = false
   node_iam_role_use_name_prefix           = false
   create_pod_identity_association         = false
   iam_role_permissions_boundary_arn       = local.permissions_boundary_arn
   node_iam_role_permissions_boundary      = local.permissions_boundary_arn
   iam_role_source_assume_policy_documents = [data.aws_iam_policy_document.source.json]
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
@@ -511,8 +495,8 @@ module "load_balancer_controller_irsa_role" {
   version = "6.6.1"
 
   use_name_prefix = false
-  name            = "${var.stack_name}-alb-role"
-  policy_name     = "AmazonEKS_AWS_Load_Balancer_Controller-${var.stack_name}"
+  name            = "${var.name}-alb-role"
+  policy_name     = "AmazonEKS_AWS_Load_Balancer_Controller-${var.name}"
 
   attach_load_balancer_controller_policy = true
 
@@ -523,7 +507,7 @@ module "load_balancer_controller_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
@@ -532,8 +516,8 @@ module "ebs_csi_driver_irsa_role" {
   version = "6.6.1"
 
   use_name_prefix = false
-  name            = "${var.stack_name}-ebs-csi-driver-role"
-  policy_name     = "AmazonEKS_EBS_CSI_Policy-${var.stack_name}"
+  name            = "${var.name}-ebs-csi-driver-role"
+  policy_name     = "AmazonEKS_EBS_CSI_Policy-${var.name}"
 
   attach_ebs_csi_policy = true
 
@@ -544,16 +528,16 @@ module "ebs_csi_driver_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
 module "s3_csi" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "5.14.1"
-  bucket  = "${var.stack_tags.Owner}-${var.stack_name}-csi-bucket"
+  bucket  = "${var.tags.Owner}-${var.name}-csi-bucket"
 
-  create_bucket                         = var.s3_csi_driver_create_bucket
+  create_bucket                         = var.s3_csi.create_bucket
   attach_deny_insecure_transport_policy = true
   attach_require_latest_tls_policy      = true
   block_public_acls                     = true
@@ -566,18 +550,18 @@ module "s3_csi" {
       }
     }
   }
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
 module "s3_driver_irsa_role" {
-  count   = var.stack_create ? 1 : 0
+  count   = var.create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.6.1"
 
   use_name_prefix = false
-  name            = "${var.stack_name}-s3-csi-driver-role"
-  policy_name     = "AmazonEKS_Mountpoint_S3_CSI-${var.stack_name}"
+  name            = "${var.name}-s3-csi-driver-role"
+  policy_name     = "AmazonEKS_Mountpoint_S3_CSI-${var.name}"
 
   attach_mountpoint_s3_csi_policy = true
   mountpoint_s3_csi_bucket_arns   = local.s3_csi_arns
@@ -589,18 +573,18 @@ module "s3_driver_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
 module "external_dns_irsa_role" {
-  count   = var.stack_create ? 1 : 0
+  count   = var.create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.6.1"
 
   use_name_prefix = false
-  name            = "${var.stack_name}-external-dns-role"
-  policy_name     = "AmazonEKS_External_DNS_Policy-${var.stack_name}"
+  name            = "${var.name}-external-dns-role"
+  policy_name     = "AmazonEKS_External_DNS_Policy-${var.name}"
 
   attach_external_dns_policy    = true
   external_dns_hosted_zone_arns = ["*"]
@@ -612,19 +596,19 @@ module "external_dns_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
 
 
 module "cert_manager_irsa_role" {
-  count   = var.stack_create ? 1 : 0
+  count   = var.create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.6.1"
 
   use_name_prefix = false
-  name            = "${var.stack_name}-cert-manager-role"
-  policy_name     = "AmazonEKS_Cert_Manager_Policy-${var.stack_name}"
+  name            = "${var.name}-cert-manager-role"
+  policy_name     = "AmazonEKS_Cert_Manager_Policy-${var.name}"
 
   attach_cert_manager_policy    = true
   cert_manager_hosted_zone_arns = ["*"]
@@ -636,6 +620,6 @@ module "cert_manager_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.stack_tags, {
+  tags = merge(var.tags, {
   })
 }
