@@ -1,5 +1,32 @@
 # Changelog
 
+## [8.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.1.1...v8.0.0) (2026-07-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* stack_cni selector + declarative CNI bootstrap (cni-bootstrap module)    ([#138](https://github.com/pelotech/terraform-foundation-aws-stack/issues/138))
+
+### Features
+
+* stack_cni selector + declarative CNI bootstrap (cni-bootstrap module)    ([#138](https://github.com/pelotech/terraform-foundation-aws-stack/issues/138)) ([5df80a6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5df80a65aad6a5f3504c3b24f5e6ffe3cf45a004))
+
+
+### Chores
+
+* **config:** migrate Renovate config ([#142](https://github.com/pelotech/terraform-foundation-aws-stack/issues/142)) ([c2be191](https://github.com/pelotech/terraform-foundation-aws-stack/commit/c2be191cedcc2145286cdbcd728f313123ad71d9))
+* **deps:** update actions/checkout digest to 3d3c42e ([#140](https://github.com/pelotech/terraform-foundation-aws-stack/issues/140)) ([d1909d4](https://github.com/pelotech/terraform-foundation-aws-stack/commit/d1909d4d9101239e52e8f2b465bb9f4bd8bc978c))
+* **deps:** update dependency aquasecurity/trivy to v0.72.0 ([#137](https://github.com/pelotech/terraform-foundation-aws-stack/issues/137)) ([77c374e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/77c374e39dc1d48c1fd8b21aa7c6e233ad834a85))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.14.1 ([#133](https://github.com/pelotech/terraform-foundation-aws-stack/issues/133)) ([3c1a87f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/3c1a87f7f6f4e4fc532c221a1fdd64d5c6edbabf))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.15.1 ([#139](https://github.com/pelotech/terraform-foundation-aws-stack/issues/139)) ([af7c8fb](https://github.com/pelotech/terraform-foundation-aws-stack/commit/af7c8fba4aa19c1ccaa2c19929ad2f5593734d61))
+* **deps:** update terraform-aws-modules/eks ([#134](https://github.com/pelotech/terraform-foundation-aws-stack/issues/134)) ([ce31857](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ce318576b8918f4be2b85a5ade108fea309d0a7c))
+* **deps:** update tflint plugin terraform-linters/tflint-ruleset-aws to v0.48.0 ([#136](https://github.com/pelotech/terraform-foundation-aws-stack/issues/136)) ([7b709ad](https://github.com/pelotech/terraform-foundation-aws-stack/commit/7b709ad5610f3b97c8fea44f3c0c35dc2583ed09))
+
+
+### Docs
+
+* **cni-bootstrap:** document adopting an existing helm release via terraform import ([#143](https://github.com/pelotech/terraform-foundation-aws-stack/issues/143)) ([bb8600f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bb8600fed788ad9e81b7340ee4d07f1e00a2c872))
+
 ## [7.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.1.0...v7.1.1) (2026-06-20)
 
 
