@@ -113,13 +113,14 @@ locals {
     "kube-ovn" = {
       system_taints = {
         critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
+        nidhogg_kube_ovn     = { key = "nidhogg.uswitch.com/kube-system.kube-ovn-pinger", value = "true", effect = "NO_SCHEDULE" }
+        nidhogg_multus       = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
       }
       system_labels = {}
       cni_node = {
         labels = { "kube-ovn/role" = "master" }
         taints = {
-          critical_addons_only = { key = "CriticalAddonsOnly", value = "true", effect = "NO_SCHEDULE" }
-          nidhogg              = { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", value = "true", effect = "NO_SCHEDULE" }
+          kube_ovn_control_plane = { key = "kube-ovn.io/control-plane", value = "true", effect = "NO_SCHEDULE" }
         }
       }
       enable_vpc_cni_addon    = false
