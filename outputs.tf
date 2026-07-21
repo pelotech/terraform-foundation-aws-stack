@@ -40,6 +40,26 @@ output "eks_cluster_endpoint" {
   value       = module.eks.cluster_endpoint
 }
 
+output "cilium_k8s_service_host" {
+  description = "Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443."
+  value       = replace(module.eks.cluster_endpoint, "https://", "")
+}
+
+output "eks_cluster_service_cidr" {
+  description = "The cluster's Kubernetes service CIDR (AWS-assigned or configured). Wire into the cni-bootstrap module's service_cidr for kube-ovn (ipv4.SVC_CIDR)."
+  value       = module.eks.cluster_service_cidr
+}
+
+output "region" {
+  description = "The AWS region the stack is deployed in. Wire into the cni-bootstrap module's region so its node-registration poll can region-qualify the cluster."
+  value       = data.aws_region.current.region
+}
+
+output "vpc_endpoint_ids" {
+  description = "Map of created VPC endpoint ids (empty when vpc_endpoints is empty)."
+  value       = try(module.vpc_endpoints[0].endpoints, {})
+}
+
 output "eks_cluster_certificate_authority_data" {
   description = "Base64 encoded certificate data for the cluster"
   value       = module.eks.cluster_certificate_authority_data
@@ -123,4 +143,42 @@ output "cert_manager_role_arn" {
 output "karpenter_role_arn" {
   description = "ARN of the Karpenter IRSA role"
   value       = try(module.karpenter[0].iam_role_arn, null)
+}
+
+################################################################################
+# CNI profile (resolved)
+################################################################################
+output "initial_node_taints_resolved" {
+  description = "(introspection) Taints applied to the initial managed node group after resolving cni and initial_node.taints(_extra)"
+  value       = local.initial_taints
+}
+
+output "initial_node_labels_resolved" {
+  description = "(introspection) Labels applied to the initial managed node group after resolving cni and initial_node.labels(_extra)"
+  value       = local.initial_labels
+}
+
+output "cluster_addons_enabled_resolved" {
+  description = "(introspection) Managed addon enablement after resolving cni and the addons.* overrides"
+  value       = local.cluster_addons_enabled
+}
+
+output "cni_node_group_enabled" {
+  description = "(introspection) Whether the dedicated CNI node group is created (true for kube-ovn unless disabled)."
+  value       = local.enable_cni_node_group
+}
+
+output "cni_node_taints_resolved" {
+  description = "(introspection) Taints applied to the dedicated CNI node group ({} when not created)."
+  value       = local.cni_node_taints
+}
+
+output "cni_node_labels_resolved" {
+  description = "(introspection) Labels applied to the dedicated CNI node group ({} when not created)."
+  value       = local.cni_node_labels
+}
+
+output "nat_tailscale_conf_resolved" {
+  description = "(introspection) Rendered tailscale fck-nat.conf lines per AZ ({} when tailscale is disabled). Only references the SSM parameter name, never the key value."
+  value       = local.nat_tailscale_conf_by_az
 }

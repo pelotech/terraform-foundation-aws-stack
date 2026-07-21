@@ -31,8 +31,13 @@ repos:
     - id: terraform_trivy
       args:
         - '--args=--severity=HIGH,CRITICAL'
-        - '--args=--ignorefile=.trivyignore'
+        - '--args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore'
         - '--args=--skip-dirs=**/.terraform'
+        # Use the checks embedded in the pinned Trivy binary instead of pulling
+        # the latest trivy-checks bundle (which can advance past the binary and
+        # fail to load — breaks CI on an empty cache). New checks arrive via
+        # Renovate Trivy bumps.
+        - '--args=--skip-check-update'
     - id: terraform_tflint
       args:
         - '--args=--only=terraform_deprecated_interpolation'

@@ -50,7 +50,7 @@ jobs:
         with:
           version: v0.72.0
 
-      - name: Regenerate terraform-docs
+      - name: Regenerate docs
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         run: pre-commit run terraform_docs --all-files || true
 
@@ -58,7 +58,7 @@ jobs:
         id: docs
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         run: |
-          if git diff --quiet -- README.md; then
+          if git diff --quiet -- ':(glob)**/README.md'; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -88,9 +88,9 @@ jobs:
           steps.docs.outputs.changed == 'true'
         uses: planetscale/ghcommit-action@a6b150b81dca5dd027baa898604418eec9e11465 # v0.2.22
         with:
-          commit_message: "docs: regenerate terraform-docs"
+          commit_message: "docs: regenerate docs"
           repo: ${{ github.repository }}
           branch: ${{ github.head_ref }}
-          file_pattern: README.md
+          file_pattern: ':(glob)**/README.md'
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
