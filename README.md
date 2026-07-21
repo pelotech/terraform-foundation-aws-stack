@@ -27,6 +27,18 @@ keys are preserved).
 | `s3_csi_driver_create_bucket` / `s3_csi_driver_bucket_arns` | `s3_csi.{create_bucket, bucket_arns}` |
 | unchanged | `cluster_enabled_log_types`, `cluster_endpoint_public_access`, `create_node_security_group`, `permissions_boundary`, `pre_bootstrap_user_data`, `node_iam_additional_policies`, `vpc_endpoints`, `extra_access_entries` |
 
+### Pelotech NAT AMI now comes from AWS Marketplace (subscription required)
+
+The `pelotech_nat` AMI defaults moved from the public fck-nat image
+(owner `568608671756`, `fck-nat-al2023-hvm-*`, no subscription needed) to the
+**Pelotech NAT product on AWS Marketplace** (`ami_owner_id = "aws-marketplace"`,
+`ami_name_filter = "pelotech-nat-al2023-hvm-*"`). Unlike the plain public image,
+Pelotech NAT is hardened for security-sensitive environments — FIPS and L2
+compliance — and includes optional integrations like Tailscale. Existing NAT
+users must **subscribe in each target account before upgrading** — see
+["Pelotech NAT instances"](#pelotech-nat-instances-aws-marketplace) — or pin the
+old public image back via `pelotech_nat = { ami_owner_id = "568608671756", ami_name_filter = "fck-nat-al2023-hvm-*" }`.
+
 ### CNI profile selector
 
 This release introduces a single **`cni`** selector that drives the initial
@@ -349,6 +361,42 @@ addons = {
 }
 ```
 
+## Pelotech NAT instances (AWS Marketplace)
+
+Setting `pelotech_nat = { enabled = true }` replaces the managed NAT gateway
+with per-AZ NAT instances launched from the **Pelotech NAT AMI on AWS
+Marketplace** — a fck-nat-based image hardened for security-sensitive
+environments (FIPS and L2 compliance) with optional integrations like
+Tailscale.
+
+> **Subscription required.** Each target AWS account must hold an active
+> Marketplace subscription to the Pelotech NAT product **before** applying —
+> otherwise the instance launch fails at apply time with
+> `OptInRequired: In order to use this AWS Marketplace product you need to
+> accept terms and subscribe`. Subscribe via the AWS Marketplace console
+> (search for "pelotech-nat"); use the product ID below to confirm you have
+> the right listing.
+
+| Product    | Architecture | Product ID           |
+| ---------- | ------------ | -------------------- |
+| commercial | arm64        | `prod-gsytpkjrvz55c` |
+| commercial | x86_64       | `prod-nwuwmpkklwra2` |
+| GovCloud   | arm64        | `prod-klr44ptdose4y` |
+| GovCloud   | x86_64       | `prod-5hmnt2qqdjbpg` |
+
+The architecture is derived from `pelotech_nat.instance_type` — the default
+`t4g.micro` is arm64, so the **arm64** product is the one you need by default.
+
+To use your own image instead (no subscription), point the module at it:
+
+```hcl
+pelotech_nat = {
+  enabled         = true
+  ami_owner_id    = "123456789012"      # your account
+  ami_name_filter = "my-nat-al2023-*"
+}
+```
+
 ## Private VPC endpoints
 
 Populate `vpc_endpoints` with endpoint service short-names to provision private
@@ -435,7 +483,7 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="input_extra_access_entries"></a> [extra\_access\_entries](#input\_extra\_access\_entries) | EKS access entries needed by IAM roles interacting with this cluster | <pre>list(object({<br/>    principal_arn     = string<br/>    kubernetes_groups = optional(list(string))<br/>    policy_associations = optional(map(object({<br/>      policy_arn = string<br/>      access_scope = object({<br/>        type       = string<br/>        namespaces = optional(list(string))<br/>      })<br/>    })), {})<br/><br/>  }))</pre> | `[]` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_node_iam_additional_policies"></a> [node\_iam\_additional\_policies](#input\_node\_iam\_additional\_policies) | Map of IAM policy name to ARN to attach to the managed node group IAM role. | `map(string)` | `{}` | no |
-| <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances (fck-nat) replacing the managed NAT gateway. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "568608671756")<br/>    ami_name_filter = optional(string, "fck-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
+| <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami\_owner\_id/ami\_name\_filter at your own image. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "aws-marketplace")<br/>    ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_pelotech_nat_tailscale_auth_key"></a> [pelotech\_nat\_tailscale\_auth\_key](#input\_pelotech\_nat\_tailscale\_auth\_key) | Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer pelotech\_nat.tailscale.auth\_key\_ssm with a pre-existing parameter). | `string` | `""` | no |
 | <a name="input_permissions_boundary"></a> [permissions\_boundary](#input\_permissions\_boundary) | IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition. | `string` | `""` | no |
 | <a name="input_pre_bootstrap_user_data"></a> [pre\_bootstrap\_user\_data](#input\_pre\_bootstrap\_user\_data) | Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages. | `string` | `null` | no |
