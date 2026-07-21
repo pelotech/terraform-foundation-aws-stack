@@ -46,17 +46,17 @@ node group's taints/labels *and* the vpc-cni/kube-proxy addon enablement from on
 CNI profile. The supported profiles are `cilium`, `kube-ovn`, and `vpc-cni`, and
 the **default is now `cilium`** (previously the defaults silently assumed kube-ovn
 + multus/nidhogg). The taints/labels below apply to the **initial (system) node
-group**; for `kube-ovn` the master label + nidhogg taint move to a dedicated CNI
-node group (see the note under the table).
+group**; for `kube-ovn` the master label + control-plane taint go to a dedicated
+CNI node group (see the note under the table).
 
-| CNI profile | Initial-group taints                                              | Initial-group labels | vpc-cni | kube-proxy |
-| ----------- | ----------------------------------------------------------------- | -------------------- | ------- | ---------- |
-| `cilium`    | `CriticalAddonsOnly`, `node.cilium.io/agent-not-ready:NO_EXECUTE` | none                 | off     | off        |
-| `kube-ovn`  | `CriticalAddonsOnly`                                              | none                 | off     | on         |
-| `vpc-cni`   | `CriticalAddonsOnly`                                              | none                 | on      | on         |
+| CNI profile | Initial-group taints                                                  | Initial-group labels | vpc-cni | kube-proxy |
+| ----------- | --------------------------------------------------------------------- | -------------------- | ------- | ---------- |
+| `cilium`    | `CriticalAddonsOnly`, `node.cilium.io/agent-not-ready:NO_EXECUTE`     | none                 | off     | off        |
+| `kube-ovn`  | `CriticalAddonsOnly` + nidhogg gates (kube-ovn-pinger, kube-multus-ds) | none                 | off     | on         |
+| `vpc-cni`   | `CriticalAddonsOnly`                                                  | none                 | on      | on         |
 
 > **kube-ovn** additionally provisions a dedicated 1-node `cni-<stack>` node group
-> that carries the `kube-ovn/role=master` label + the `nidhogg…kube-multus-ds`
+> that carries the `kube-ovn/role=master` label + the `kube-ovn.io/control-plane`
 > taint and hosts `ovn-central` — kept separate so upgrades recycle it without
 > touching the system group. See ["Node upgrades on kube-ovn"](#node-upgrades-on-kube-ovn-version-bumps--security-patches).
 
@@ -65,9 +65,10 @@ node group (see the note under the table).
 - **Set `cni` to match your current CNI.** Consumers previously on the
   defaults were effectively running kube-ovn — set `cni = "kube-ovn"` (and
   `cni_node.kubernetes_version`, now required). Note this **provisions the new
-  dedicated `cni-<stack>` node group** and moves the master label/nidhogg taint
-  off the initial group, so expect the new group plus an initial-group roll — it
-  does **not** preserve the old single-group layout unchanged.
+  dedicated `cni-<stack>` node group** and moves the master label off the
+  initial group (the nidhogg gating taints stay on it), so expect the new group
+  plus an initial-group roll — it does **not** preserve the old single-group
+  layout unchanged.
 - **Leaving the default (`cilium`) changes node group taints/labels**, which
   forces the managed node group to roll/replace nodes. Only take the default
   if you intend to run Cilium.
@@ -124,9 +125,10 @@ recycle** (destroy/recreate).
 
 **How it's structured:** for `cni = "kube-ovn"` the module runs **two** node
 groups — the `initial-<stack>` **system group** (coredns + critical addons; carries
-only `CriticalAddonsOnly`; follows `cluster_version`; rolls in place) and a
-dedicated 1-node `cni-<stack>` **control-plane group** (`kube-ovn/role=master` +
-nidhogg taint; version-pinned; recycled). Because the recycle destroys **only the
+`CriticalAddonsOnly` + the nidhogg gating taints; follows `cluster_version`; rolls
+in place) and a dedicated 1-node `cni-<stack>` **control-plane group**
+(`kube-ovn/role=master` + control-plane taint; version-pinned; recycled). Because
+the recycle destroys **only the
 1-node CNI group**, coredns/DNS and the system group stay up — no coredns/PDB dance,
 and at most one coredns replica is ever disrupted so its PDB is always satisfied.
 (`cilium`/`vpc-cni` get just the one initial group.)
@@ -231,12 +233,12 @@ the vpc-cni/kube-proxy addon toggles to match. All values remain overridable
 | `cni`               | vpc-cni | kube-proxy | Initial-group taints/labels                   | Notes                                                       |
 | ------------------- | ------- | ---------- | --------------------------------------------- | ----------------------------------------------------------- |
 | `cilium` (default)  | off     | off        | `CriticalAddonsOnly` + cilium agent-not-ready | Install Cilium (kube-proxy replacement) via Helm.           |
-| `kube-ovn`          | off     | on         | `CriticalAddonsOnly`                           | Also adds a dedicated CNI node group (see note). Install via Helm/ArgoCD post-bootstrap. |
+| `kube-ovn`          | off     | on         | `CriticalAddonsOnly` + nidhogg gates           | Also adds a dedicated CNI node group (see note). Install via Helm/ArgoCD post-bootstrap. |
 | `vpc-cni`           | on      | on         | `CriticalAddonsOnly`                           | AWS native. IRSA / prefix delegation via `*_overrides`.     |
 
 > **kube-ovn** provisions an extra dedicated 1-node `cni-<stack>` node group that
-> carries the `kube-ovn/role=master` label + the `nidhogg…kube-multus-ds` taint
-> (not the system group) and requires `cni_node.kubernetes_version`. See
+> carries the `kube-ovn/role=master` label + the `kube-ovn.io/control-plane` taint
+> and requires `cni_node.kubernetes_version`. See
 > ["Node upgrades on kube-ovn"](#node-upgrades-on-kube-ovn-version-bumps--security-patches).
 
 For any other CNI, pick the closest profile and override the addon toggles /
@@ -281,11 +283,11 @@ benefits (DSR, no iptables scaling cliff).
 ```hcl
 module "foundation" {
   # ...
-  cni = "kube-ovn" # vpc-cni off, kube-proxy on; system group gets only CriticalAddonsOnly
+  cni = "kube-ovn" # vpc-cni off, kube-proxy on; system group gets CriticalAddonsOnly + nidhogg gates
 
   # kubernetes_version is required for kube-ovn: pins the dedicated CNI node group
-  # (kube-ovn/role=master + nidhogg taint) so a control-plane bump never auto-rolls
-  # the master node.
+  # (kube-ovn/role=master + control-plane taint) so a control-plane bump never
+  # auto-rolls the master node.
   cni_node = { kubernetes_version = "1.35" }
 }
 ```
@@ -474,7 +476,7 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="input_cluster_enabled_log_types"></a> [cluster\_enabled\_log\_types](#input\_cluster\_enabled\_log\_types) | List of EKS control plane log types to enable. Valid values: api, audit, authenticator, controllerManager, scheduler. | `list(string)` | `[]` | no |
 | <a name="input_cluster_endpoint_public_access"></a> [cluster\_endpoint\_public\_access](#input\_cluster\_endpoint\_public\_access) | Whether the EKS cluster API server endpoint is publicly accessible. Set to false for private-only access (requires VPC connectivity). | `bool` | `true` | no |
 | <a name="input_cluster_version"></a> [cluster\_version](#input\_cluster\_version) | Kubernetes version to set for the cluster | `string` | `"1.35"` | no |
-| <a name="input_cni"></a> [cni](#input\_cni) | CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the kube-ovn/role=master label + nidhogg taint move to a dedicated CNI node group (the cni\_node variable), not the system group. Override individual pieces with initial\_node.taints(\_extra)/labels(\_extra) and the addons toggles. | `string` | `"cilium"` | no |
+| <a name="input_cni"></a> [cni](#input\_cni) | CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the system group carries the nidhogg gating taints, while the kube-ovn/role=master label + control-plane taint go to a dedicated CNI node group (the cni\_node variable). Override individual pieces with initial\_node.taints(\_extra)/labels(\_extra) and the addons toggles. | `string` | `"cilium"` | no |
 | <a name="input_cni_node"></a> [cni\_node](#input\_cni\_node) | Dedicated CNI node group (kube-ovn control plane). enabled: null derives from cni (true for kube-ovn, false otherwise); set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group. kubernetes\_version: version this group runs — bump to upgrade it; decoupled from cluster\_version so a control-plane bump doesn't auto-roll it (null follows cluster\_version, REQUIRED for cni="kube-ovn"); replace it deliberately via the recycle (toggle enabled + bump cni-bootstrap's bootstrap\_generation). instance\_types: null falls back to initial\_node.instance\_types; must all be one architecture. ami\_release\_version: pin the AMI release (e.g. a same-version security patch); null uses the default AMI for its kubernetes\_version. size: node count (min=max=desired); default 1 = a single kube-ovn ovn-central master. | <pre>object({<br/>    enabled             = optional(bool)<br/>    kubernetes_version  = optional(string)<br/>    instance_types      = optional(list(string))<br/>    ami_release_version = optional(string)<br/>    size                = optional(number, 1)<br/>  })</pre> | `{}` | no |
 | <a name="input_create"></a> [create](#input\_create) | should resources be created | `bool` | `true` | no |
 | <a name="input_create_cluster_kms"></a> [create\_cluster\_kms](#input\_create\_cluster\_kms) | Should secrets be encrypted by kms in the cluster | `bool` | `true` | no |

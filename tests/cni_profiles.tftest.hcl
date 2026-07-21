@@ -73,24 +73,25 @@ run "kube_ovn_profile" {
     cni_node = { kubernetes_version = "1.35" }
   }
 
-  # Initial/system group: only CriticalAddonsOnly — the master label + nidhogg taint
-  # move to the dedicated CNI node group.
+  # Initial/system group: CriticalAddonsOnly + the nidhogg daemonset-gating taints
+  # (kube-ovn-pinger, kube-multus-ds). The master label + control-plane taint go to
+  # the dedicated CNI node group.
   assert {
-    condition     = contains(keys(output.initial_node_taints_resolved), "critical_addons_only") && !contains(keys(output.initial_node_taints_resolved), "nidhogg")
-    error_message = "kube-ovn initial group must carry only CriticalAddonsOnly (no nidhogg)"
+    condition     = contains(keys(output.initial_node_taints_resolved), "critical_addons_only") && anytrue([for k in keys(output.initial_node_taints_resolved) : startswith(k, "nidhogg")])
+    error_message = "kube-ovn initial group must carry CriticalAddonsOnly + the nidhogg gating taints"
   }
   assert {
     condition     = length(output.initial_node_labels_resolved) == 0
     error_message = "kube-ovn initial group must not carry the kube-ovn/role=master label"
   }
-  # Dedicated CNI node group carries the master label + nidhogg taint.
+  # Dedicated CNI node group carries the master label + control-plane taint only.
   assert {
     condition     = output.cni_node_group_enabled == true
     error_message = "kube-ovn must create the dedicated CNI node group"
   }
   assert {
-    condition     = output.cni_node_labels_resolved["kube-ovn/role"] == "master" && contains(keys(output.cni_node_taints_resolved), "nidhogg")
-    error_message = "the CNI node group must carry kube-ovn/role=master + the nidhogg taint"
+    condition     = output.cni_node_labels_resolved["kube-ovn/role"] == "master" && contains(keys(output.cni_node_taints_resolved), "kube_ovn_control_plane") && !anytrue([for k in keys(output.cni_node_taints_resolved) : startswith(k, "nidhogg")])
+    error_message = "the CNI node group must carry kube-ovn/role=master + the control-plane taint only (no nidhogg)"
   }
   assert {
     condition     = output.cluster_addons_enabled_resolved["vpc-cni"] == false && output.cluster_addons_enabled_resolved["kube-proxy"] == true

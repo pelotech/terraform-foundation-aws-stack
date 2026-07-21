@@ -69,7 +69,7 @@ variable "tags" {
 variable "cni" {
   type        = string
   default     = "cilium"
-  description = "CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the kube-ovn/role=master label + nidhogg taint move to a dedicated CNI node group (the cni_node variable), not the system group. Override individual pieces with initial_node.taints(_extra)/labels(_extra) and the addons toggles."
+  description = "CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the system group carries the nidhogg gating taints, while the kube-ovn/role=master label + control-plane taint go to a dedicated CNI node group (the cni_node variable). Override individual pieces with initial_node.taints(_extra)/labels(_extra) and the addons toggles."
   validation {
     condition     = contains(["cilium", "kube-ovn", "vpc-cni"], var.cni)
     error_message = "cni must be one of: cilium, kube-ovn, vpc-cni."
