@@ -425,7 +425,8 @@ module "eks" {
         ami_type       = local.initial_is_arm ? "AL2023_ARM_64_STANDARD" : "AL2023_x86_64_STANDARD"
         labels         = local.initial_labels
         taints         = local.initial_taints
-      })
+        # Only set when true so the upstream module's default stays in charge otherwise.
+      }, var.initial_node.force_update_version ? { force_update_version = true } : {})
     } : {},
     # Dedicated CNI control-plane group (kube-ovn). Version-pinned and recycled
     # (destroy/recreate) on upgrade so the initial group + coredns are untouched.

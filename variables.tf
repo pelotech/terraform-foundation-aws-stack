@@ -1,15 +1,16 @@
 variable "initial_node" {
-  description = "Initial (system) managed node group. instance_types is required and must all be one architecture (the node AMI type is derived from them). taints/labels: leave null to derive from the cni profile merged with taints_extra/labels_extra (caller keys win); set to a map to replace the preset entirely ({} for none)."
+  description = "Initial (system) managed node group. instance_types is required and must all be one architecture (the node AMI type is derived from them). taints/labels: leave null to derive from the cni profile merged with taints_extra/labels_extra (caller keys win); set to a map to replace the preset entirely ({} for none). force_update_version: evict through PodDisruptionBudgets when a version roll exhausts the per-node eviction window (escape hatch for PodEvictionFailure; pods blocked by a PDB are deleted). Default false."
   type = object({
-    instance_types = list(string)
-    enabled        = optional(bool, true)
-    min_size       = optional(number, 2)
-    max_size       = optional(number, 6)
-    desired_size   = optional(number, 3)
-    taints         = optional(map(object({ key = string, value = string, effect = string })))
-    taints_extra   = optional(map(object({ key = string, value = string, effect = string })), {})
-    labels         = optional(map(string))
-    labels_extra   = optional(map(string), {})
+    instance_types       = list(string)
+    enabled              = optional(bool, true)
+    min_size             = optional(number, 2)
+    max_size             = optional(number, 6)
+    desired_size         = optional(number, 3)
+    force_update_version = optional(bool, false)
+    taints               = optional(map(object({ key = string, value = string, effect = string })))
+    taints_extra         = optional(map(object({ key = string, value = string, effect = string })), {})
+    labels               = optional(map(string))
+    labels_extra         = optional(map(string), {})
     timeouts = optional(object({
       create = optional(string)
       update = optional(string)
