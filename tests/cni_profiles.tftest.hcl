@@ -206,6 +206,22 @@ run "addon_overrides_merge_over_defaults" {
   }
 }
 
+run "force_update_version_accepted" {
+  command = plan
+
+  variables {
+    initial_node = {
+      instance_types       = ["m5.large"]
+      force_update_version = true
+    }
+  }
+
+  assert {
+    condition     = output.cni_node_group_enabled == false
+    error_message = "initial_node.force_update_version must be accepted without affecting profile resolution"
+  }
+}
+
 run "vpc_endpoints_disabled_by_default" {
   command = plan
 
