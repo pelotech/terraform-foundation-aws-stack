@@ -257,6 +257,62 @@ pelotech_nat = {
 }
 ```
 
+### AMI updates
+
+The AMI is resolved with a `most_recent` lookup against `ami_name_filter`. By
+default a newer AMI only produces a new launch template version — the running
+instance is not replaced; recycle it manually (terminate the instance and the
+ASG relaunches it from the latest launch template version). Set
+`pelotech_nat.auto_rollout = true` to opt in to automatic rolling: an apply
+that picks up a newer AMI triggers an instance refresh on the NAT auto scaling
+group. The old instance is terminated before its replacement attaches the
+network interface, so expect a brief per-AZ NAT egress outage during the roll.
+
+### Migrating from the managed NAT gateway (keeping your EIPs)
+
+Switching an existing stack to `pelotech_nat` normally destroys the managed
+NAT gateways **and their EIPs**, changing your egress IPs. To keep the same
+addresses, move the vpc module's NAT EIPs into this module's `aws_eip.main`.
+Counts align one-to-one per AZ (managed NAT runs one gateway + EIP per AZ),
+so the move is index-for-index.
+
+Requires Terraform >= 1.3 (`moved` across module packages). In the same
+change that sets `pelotech_nat = { enabled = true }`, add one `moved` block
+per AZ to your root module:
+
+```hcl
+moved {
+  from = module.<stack>.module.vpc.aws_eip.nat[0]
+  to   = module.<stack>.aws_eip.main[0]
+}
+moved {
+  from = module.<stack>.module.vpc.aws_eip.nat[1]
+  to   = module.<stack>.aws_eip.main[1]
+}
+# ...one per AZ
+```
+
+The plan must show the EIPs **moved and updated in place** (tag changes only
+— `Name` becomes `nat-<name>-<i>`), NOT destroyed. The NAT gateways are
+destroyed and the fck-nat instances re-associate the same allocations at
+boot. Once applied, the moved blocks can be deleted.
+
+Alternatively, run `terraform state mv` with the same from/to addresses —
+but do it **before** the apply that flips `enabled = true`, or the plan will
+destroy and release the addresses.
+
+Notes:
+
+- Adapt `module.<stack>` to how you instantiate the module (drop it entirely
+  if this module is your root).
+- Confirm index↔AZ alignment first with
+  `terraform state show 'module.<stack>.module.vpc.aws_eip.nat[0]'` — both
+  resources iterate the AZ list in the same order.
+- Expect a brief per-AZ egress outage during cutover. If an instance boots
+  before its AZ's NAT gateway is fully deleted, its EIP association fails —
+  terminate that instance (the ASG relaunches it) and the association
+  re-runs at boot.
+
 ## Private VPC endpoints
 
 Populate `vpc_endpoints` with endpoint service short-names to provision private
@@ -343,7 +399,7 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="input_extra_access_entries"></a> [extra\_access\_entries](#input\_extra\_access\_entries) | EKS access entries needed by IAM roles interacting with this cluster | <pre>list(object({<br/>    principal_arn     = string<br/>    kubernetes_groups = optional(list(string))<br/>    policy_associations = optional(map(object({<br/>      policy_arn = string<br/>      access_scope = object({<br/>        type       = string<br/>        namespaces = optional(list(string))<br/>      })<br/>    })), {})<br/><br/>  }))</pre> | `[]` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_node_iam_additional_policies"></a> [node\_iam\_additional\_policies](#input\_node\_iam\_additional\_policies) | Map of IAM policy name to ARN to attach to the managed node group IAM role. | `map(string)` | `{}` | no |
-| <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami\_owner\_id/ami\_name\_filter at your own image. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "aws-marketplace")<br/>    ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
+| <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami\_owner\_id/ami\_name\_filter at your own image. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. auto\_rollout (default false): when enabled, a newer AMI matching ami\_name\_filter found at apply time triggers a rolling instance refresh on the NAT ASG (brief per-AZ NAT outage while the instance is replaced); leave false to recycle instances manually. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "aws-marketplace")<br/>    ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    auto_rollout    = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_pelotech_nat_tailscale_auth_key"></a> [pelotech\_nat\_tailscale\_auth\_key](#input\_pelotech\_nat\_tailscale\_auth\_key) | Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer pelotech\_nat.tailscale.auth\_key\_ssm with a pre-existing parameter). | `string` | `""` | no |
 | <a name="input_permissions_boundary"></a> [permissions\_boundary](#input\_permissions\_boundary) | IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition. | `string` | `""` | no |
 | <a name="input_pre_bootstrap_user_data"></a> [pre\_bootstrap\_user\_data](#input\_pre\_bootstrap\_user\_data) | Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages. | `string` | `null` | no |

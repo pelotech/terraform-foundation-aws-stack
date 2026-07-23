@@ -331,15 +331,15 @@ module "fck_nat" {
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
   instance_type       = var.pelotech_nat.instance_type
+  auto_rollout        = var.pelotech_nat.auto_rollout
   cloud_init_parts    = local.nat_tailscale_enabled ? [local.nat_tailscale_cloud_init_by_az[module.vpc.azs[count.index]]] : []
   update_route_tables = true
   route_tables_ids = {
     private = module.vpc.private_route_table_ids[count.index]
   }
-
-  tags = {
-    Name = "${var.name}-${module.vpc.azs[count.index]}"
-  }
+  tags = merge(var.tags, {
+    Name ="${var.name}-${module.vpc.azs[count.index]}"
+  })
 }
 
 data "aws_region" "current" {}
