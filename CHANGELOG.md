@@ -1,5 +1,18 @@
 # Changelog
 
+## [8.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v8.0.0...v8.1.0) (2026-07-23)
+
+
+### Features
+
+* add auto_rollout config and document switching eip from nat gateway to nat instance ([#146](https://github.com/pelotech/terraform-foundation-aws-stack/issues/146)) ([4aa5419](https://github.com/pelotech/terraform-foundation-aws-stack/commit/4aa5419c4a367db7cd9487e5f01b4da840d48765))
+* expose initial node group force_update_version ([#144](https://github.com/pelotech/terraform-foundation-aws-stack/issues/144)) ([faddcb6](https://github.com/pelotech/terraform-foundation-aws-stack/commit/faddcb6c125db909f7eb2253f09e795cce280be5))
+
+
+### Chores
+
+* **deps:** update helm release cilium to v1.19.6 ([#141](https://github.com/pelotech/terraform-foundation-aws-stack/issues/141)) ([b3c6c05](https://github.com/pelotech/terraform-foundation-aws-stack/commit/b3c6c056597dba988a53235bc63d2174fbdf14b4))
+
 ## [8.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v7.1.1...v8.0.0) (2026-07-21)
 
 
