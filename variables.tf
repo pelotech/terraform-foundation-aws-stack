@@ -96,13 +96,14 @@ variable "create_cluster_kms" {
 }
 
 variable "pelotech_nat" {
-  description = "Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami_owner_id/ami_name_filter at your own image. create_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. tailscale: provide auth via tailscale.auth_key_ssm (name of an existing SSM parameter) or pelotech_nat_tailscale_auth_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module."
+  description = "Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami_owner_id/ami_name_filter at your own image. create_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. auto_rollout (default false): when enabled, a newer AMI matching ami_name_filter found at apply time triggers a rolling instance refresh on the NAT ASG (brief per-AZ NAT outage while the instance is replaced); leave false to recycle instances manually. tailscale: provide auth via tailscale.auth_key_ssm (name of an existing SSM parameter) or pelotech_nat_tailscale_auth_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module."
   type = object({
     enabled         = optional(bool, false)
     instance_type   = optional(string, "t4g.micro")
     ami_owner_id    = optional(string, "aws-marketplace")
     ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")
     create_eip      = optional(bool, false)
+    auto_rollout    = optional(bool, false)
     tailscale = optional(object({
       enabled            = optional(bool, false)
       auth_key_ssm       = optional(string, "")

@@ -227,8 +227,7 @@ module "vpc" {
     "karpenter.sh/discovery"          = var.name
     "kubernetes.io/role/internal-elb" = 1
   }
-  tags = merge(var.tags, {
-  })
+  tags = var.tags
 }
 
 locals {
@@ -271,6 +270,7 @@ resource "aws_ssm_parameter" "nat_tailscale_auth_key" {
   name  = local.nat_tailscale_auth_key_ssm
   type  = "SecureString"
   value = var.pelotech_nat_tailscale_auth_key
+  tags  = var.tags
 }
 
 resource "aws_iam_role_policy" "nat_tailscale_ssm" {
@@ -313,9 +313,9 @@ data "aws_ami" "main" {
 
 resource "aws_eip" "main" {
   count = (var.pelotech_nat.enabled || var.pelotech_nat.create_eip) ? length(module.vpc.azs) : 0
-  tags = {
+  tags = merge(var.tags, {
     Name = "nat-${var.name}-${count.index}"
-  }
+  })
 }
 
 module "fck_nat" {
@@ -331,15 +331,15 @@ module "fck_nat" {
   # use_cloudwatch_agent = true
   # use_spot_instances   = true
   instance_type       = var.pelotech_nat.instance_type
+  auto_rollout        = var.pelotech_nat.auto_rollout
   cloud_init_parts    = local.nat_tailscale_enabled ? [local.nat_tailscale_cloud_init_by_az[module.vpc.azs[count.index]]] : []
   update_route_tables = true
   route_tables_ids = {
     private = module.vpc.private_route_table_ids[count.index]
   }
-
-  tags = {
+  tags = merge(var.tags, {
     Name = "${var.name}-${module.vpc.azs[count.index]}"
-  }
+  })
 }
 
 data "aws_region" "current" {}
@@ -486,8 +486,7 @@ module "karpenter" {
   iam_role_permissions_boundary_arn       = local.permissions_boundary_arn
   node_iam_role_permissions_boundary      = local.permissions_boundary_arn
   iam_role_source_assume_policy_documents = [data.aws_iam_policy_document.source.json]
-  tags = merge(var.tags, {
-  })
+  tags                                    = var.tags
 }
 
 # IAM roles and policies for the cluster
@@ -508,8 +507,7 @@ module "load_balancer_controller_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.tags, {
-  })
+  tags                 = var.tags
 }
 
 module "ebs_csi_driver_irsa_role" {
@@ -529,8 +527,7 @@ module "ebs_csi_driver_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.tags, {
-  })
+  tags                 = var.tags
 }
 
 module "s3_csi" {
@@ -551,8 +548,7 @@ module "s3_csi" {
       }
     }
   }
-  tags = merge(var.tags, {
-  })
+  tags = var.tags
 }
 
 module "s3_driver_irsa_role" {
@@ -574,8 +570,7 @@ module "s3_driver_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.tags, {
-  })
+  tags                 = var.tags
 }
 
 module "external_dns_irsa_role" {
@@ -597,8 +592,7 @@ module "external_dns_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.tags, {
-  })
+  tags                 = var.tags
 }
 
 
@@ -621,6 +615,5 @@ module "cert_manager_irsa_role" {
     }
   }
   permissions_boundary = local.permissions_boundary_arn
-  tags = merge(var.tags, {
-  })
+  tags                 = var.tags
 }
