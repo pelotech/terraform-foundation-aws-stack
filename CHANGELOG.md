@@ -1,5 +1,15 @@
 # Changelog
 
+## [8.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v8.1.0...v8.1.1) (2026-08-01)
+
+
+### Chores
+
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.24.1 ([#150](https://github.com/pelotech/terraform-foundation-aws-stack/issues/150)) ([84cb713](https://github.com/pelotech/terraform-foundation-aws-stack/commit/84cb7136aa74bb56ba60c923170e2a3543fe594b))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v6.8.0 ([#148](https://github.com/pelotech/terraform-foundation-aws-stack/issues/148)) ([74e1e78](https://github.com/pelotech/terraform-foundation-aws-stack/commit/74e1e78568bdb8c8632a940d343e276b3dd83181))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.15.3 ([#147](https://github.com/pelotech/terraform-foundation-aws-stack/issues/147)) ([c6a76d7](https://github.com/pelotech/terraform-foundation-aws-stack/commit/c6a76d7aa01c491797d91c44999de43355a3a024))
+* **dep:** use fork till PR gets released ([2798724](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2798724706ba1bd4fc5350c01cc3d4867850bc99))
+
 ## [8.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v8.0.0...v8.1.0) (2026-07-23)
 
 
