@@ -33,6 +33,10 @@ variable "initial_node" {
     condition     = var.initial_node.min_size >= 0
     error_message = "initial_node.min_size must be >= 0."
   }
+  validation {
+    condition     = var.initial_node.min_size <= var.initial_node.desired_size && var.initial_node.desired_size <= var.initial_node.max_size
+    error_message = "initial_node sizes must satisfy: min_size <= desired_size <= max_size."
+  }
 }
 
 variable "name" {
@@ -44,7 +48,7 @@ variable "name" {
 variable "create" {
   type        = bool
   default     = true
-  description = "should resources be created"
+  description = "Create the EKS cluster and its IAM identities (cluster, node groups, addons, Karpenter, IRSA and Pod Identity roles). NOTE: this does NOT gate the surrounding infrastructure — the VPC, subnets, NAT instances, EIPs, Tailscale SSM parameters, VPC endpoints and the S3 CSI bucket are created regardless, gated by their own variables (existing_vpc, pelotech_nat, vpc_endpoints, s3_csi). Setting create = false plans successfully but still bills for those."
 }
 
 variable "cluster_version" {
@@ -78,15 +82,102 @@ variable "cni" {
 }
 
 variable "addons" {
-  description = "Managed cluster addon toggles and overrides. vpc_cni/kube_proxy: leave null (default) to derive from the cni profile (vpc-cni: on for cni=vpc-cni; kube-proxy: off for cilium kube-proxy replacement); set true/false to force. When the vpc-cni addon is off, nodeadm maxPods=110 cloudinit is applied automatically. overrides: per-addon overrides keyed by addon name (e.g. \"vpc-cni\", \"kube-proxy\", \"coredns\") merged over module defaults — accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map."
+  description = "Managed cluster addon toggles and overrides. vpc_cni/kube_proxy: leave null (default) to derive from the cni profile (vpc-cni: on for cni=vpc-cni; kube-proxy: off for cilium kube-proxy replacement); set true/false to force. When the vpc-cni addon is off, nodeadm maxPods=110 cloudinit is applied automatically. pod_identity_agent: leave null (default) to enable whenever any identity uses Pod Identity; set true/false to force. overrides: per-addon overrides keyed by addon name (e.g. \"vpc-cni\", \"kube-proxy\", \"coredns\", \"eks-pod-identity-agent\") merged over module defaults — accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map."
   type = object({
-    vpc_cni    = optional(bool)
-    kube_proxy = optional(bool)
-    coredns    = optional(bool, true)
-    overrides  = optional(any, {})
+    vpc_cni            = optional(bool)
+    kube_proxy         = optional(bool)
+    coredns            = optional(bool, true)
+    pod_identity_agent = optional(bool)
+    overrides          = optional(any, {})
   })
   default  = {}
   nullable = false
+}
+
+variable "pod_identity" {
+  description = <<-EOT
+    EKS Pod Identity for the workload identities this module creates (load_balancer_controller,
+    ebs_csi_driver, s3_csi_driver, external_dns, cert_manager, karpenter).
+
+    When enabled, each identity gets its own Pod Identity role plus an association, and the
+    `eks-pod-identity-agent` addon is installed. The legacy IRSA roles are left untouched and keep
+    their own ARNs, so disabling an identity is a no-op on existing state.
+
+    NOTE: Pod Identity takes precedence over an `eks.amazonaws.com/role-arn` service account
+    annotation. Disable an identity here to keep IRSA serving it.
+
+    overrides (keyed by identity name):
+      enabled              — false leaves the identity on IRSA (required in GovCloud for
+                             cert_manager/external_dns when the hosted zones live in a commercial
+                             account, since IAM cannot assume a role across partitions).
+      target_role_arn      — cross-account role chaining. The target role holds the permissions,
+                             so the predefined policy is replaced by an sts:AssumeRole grant.
+                             Same-partition only; not supported for karpenter.
+      disable_session_tags — passed through to the association. Not supported for karpenter.
+      hosted_zone_arns     — Route53 scoping for cert_manager/external_dns only. Null (default)
+                             keeps the historic unscoped grant. Applies to the Pod Identity role
+                             only: an identity left on IRSA keeps its own unscoped grant, because
+                             the IRSA roles are deliberately never modified.
+  EOT
+  type = object({
+    enabled = optional(bool, true)
+    overrides = optional(map(object({
+      enabled              = optional(bool)
+      target_role_arn      = optional(string)
+      disable_session_tags = optional(bool)
+      hosted_zone_arns     = optional(list(string))
+    })), {})
+  })
+  default  = {}
+  nullable = false
+
+  validation {
+    condition = alltrue([
+      for k in keys(var.pod_identity.overrides) : contains([
+        "load_balancer_controller",
+        "ebs_csi_driver",
+        "s3_csi_driver",
+        "external_dns",
+        "cert_manager",
+        "karpenter",
+      ], k)
+    ])
+    error_message = "pod_identity.overrides keys must be one of: load_balancer_controller, ebs_csi_driver, s3_csi_driver, external_dns, cert_manager, karpenter."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.pod_identity.overrides :
+      v.target_role_arn == null || coalesce(v.enabled, var.pod_identity.enabled)
+    ])
+    error_message = "pod_identity.overrides[*].target_role_arn requires Pod Identity to be enabled for that identity."
+  }
+
+  validation {
+    condition = (
+      try(var.pod_identity.overrides["karpenter"].target_role_arn, null) == null &&
+      try(var.pod_identity.overrides["karpenter"].disable_session_tags, null) == null
+    )
+    error_message = "pod_identity.overrides.karpenter supports only `enabled`; its association is owned by the upstream karpenter submodule."
+  }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.pod_identity.overrides :
+      v.hosted_zone_arns == null || contains(["cert_manager", "external_dns"], k)
+    ])
+    error_message = "pod_identity.overrides[*].hosted_zone_arns is only supported for cert_manager and external_dns."
+  }
+
+  validation {
+    # An empty list renders an IAM statement with no Resource, which IAM rejects at apply time.
+    # Omit the attribute to keep the unscoped grant instead.
+    condition = alltrue([
+      for k, v in var.pod_identity.overrides :
+      v.hosted_zone_arns == null || length(coalesce(v.hosted_zone_arns, [])) > 0
+    ])
+    error_message = "pod_identity.overrides[*].hosted_zone_arns must not be an empty list; omit it to keep the unscoped grant."
+  }
 }
 
 variable "create_cluster_kms" {
@@ -130,6 +221,17 @@ variable "pelotech_nat" {
     ] : !strcontains(v, "\"") && !strcontains(v, "\n")])
     error_message = "Tailscale settings must not contain double quotes or newlines (values are written as key=\"value\" lines into /etc/fck-nat.conf)."
   }
+  validation {
+    # NAT instances are placed into module-created public subnets and patched into module-created
+    # private route tables. With existing_vpc those outputs are empty while module.vpc.azs still
+    # returns var.vpc.azs, so the count is non-zero and subnet/route-table indexing fails.
+    condition     = !var.pelotech_nat.enabled || var.existing_vpc == null
+    error_message = "pelotech_nat.enabled cannot be combined with existing_vpc: the module can only place NAT instances in subnets and route tables it created. Manage NAT yourself in a pre-existing VPC."
+  }
+  validation {
+    condition     = !var.pelotech_nat.create_eip || var.existing_vpc == null
+    error_message = "pelotech_nat.create_eip cannot be combined with existing_vpc: the EIP count is derived from the module-created VPC's availability zones."
+  }
 }
 
 variable "pelotech_nat_tailscale_auth_key" {
@@ -169,6 +271,16 @@ variable "vpc" {
     database_subnets = ["172.16.200.0/24", "172.16.201.0/24", "172.16.202.0/24"]
   }
   description = "Variables for defining the vpc for the stack (ignored when existing_vpc is set)"
+
+  validation {
+    # NAT instances and per-AZ resources index the subnet lists by AZ position.
+    condition     = length(var.vpc.azs) <= length(var.vpc.public_subnets)
+    error_message = "vpc.public_subnets must have at least as many entries as vpc.azs; per-AZ resources index it by AZ position."
+  }
+  validation {
+    condition     = length(var.vpc.azs) <= length(var.vpc.private_subnets)
+    error_message = "vpc.private_subnets must have at least as many entries as vpc.azs; per-AZ resources index it by AZ position."
+  }
 }
 
 variable "extra_access_entries" {
@@ -207,7 +319,7 @@ variable "extra_access_entries" {
 }
 
 variable "access" {
-  description = "IAM role ARNs granted cluster access. admin_arns: cluster admins. admin_ro_arns: admin read only with secret and configmap access. ro_arns: read only. Both *_ro groups also get KMS readonly access for CI plan purposes; more limited access should use extra_access_entries."
+  description = "IAM role ARNs granted cluster access. admin_arns: cluster admins. admin_ro_arns: admin read only with secret and configmap access. ro_arns: read only. KMS: admin_arns AND admin_ro_arns are both granted KMS key *administrator* on the cluster secrets key — that includes kms:PutKeyPolicy and kms:ScheduleKeyDeletion, so admin_ro_arns is not read-only with respect to KMS and can self-escalate or schedule the key for deletion. ro_arns receives no KMS access at all. For genuinely least-privilege access, use extra_access_entries instead of admin_ro_arns."
   type = object({
     admin_arns    = optional(list(string), [])
     admin_ro_arns = optional(list(string), [])
@@ -243,16 +355,37 @@ variable "cni_node" {
     condition     = var.cni_node.instance_types == null || length(distinct([for t in var.cni_node.instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
     error_message = "All cni_node.instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
   }
+  validation {
+    condition     = var.cni_node.instance_types == null || length(coalesce(var.cni_node.instance_types, [])) > 0
+    error_message = "cni_node.instance_types must not be empty; omit it to inherit initial_node.instance_types."
+  }
+  validation {
+    condition     = var.cni_node.size >= 1
+    error_message = "cni_node.size must be >= 1."
+  }
 }
 
 variable "s3_csi" {
-  description = "S3 CSI driver bucket access. create_bucket: create a new bucket for use with the driver. bucket_arns: existing buckets the driver should have access to."
+  description = "S3 CSI driver bucket access. create_bucket: create a new bucket for use with the driver. bucket_name: override the generated bucket name (default \"<tags.Owner>-<name>-csi-bucket\"); required if tags has no Owner key. bucket_arns: existing buckets the driver should have access to. When create_bucket is false and bucket_arns is empty, no S3 policy is attached to the driver roles at all."
   type = object({
     create_bucket = optional(bool, true)
+    bucket_name   = optional(string)
     bucket_arns   = optional(list(string), [])
   })
   default  = {}
   nullable = false
+
+  validation {
+    # The generated name interpolates var.tags["Owner"], which is a free-form map: a missing key is
+    # an opaque plan crash, and a value that is uppercase, spaced, or long produces an invalid
+    # bucket name at apply. bucket_name is the escape hatch.
+    condition     = var.s3_csi.bucket_name != null || contains(keys(var.tags), "Owner")
+    error_message = "s3_csi bucket naming requires either s3_csi.bucket_name, or an \"Owner\" key in var.tags. The generated name is \"<tags.Owner>-<name>-csi-bucket\" and must be a valid S3 bucket name: lowercase, [a-z0-9.-], 3-63 characters."
+  }
+  validation {
+    condition     = var.s3_csi.bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.s3_csi.bucket_name))
+    error_message = "s3_csi.bucket_name must be a valid S3 bucket name: lowercase, [a-z0-9.-], 3-63 characters, starting and ending alphanumeric."
+  }
 }
 
 variable "vpc_endpoints" {

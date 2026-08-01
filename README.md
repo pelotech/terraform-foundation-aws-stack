@@ -138,7 +138,10 @@ module "cni_bootstrap" {
 For `cni = "kube-ovn"`, also wire `service_cidr = module.foundation.eks_cluster_service_cidr`
 (so `ipv4.SVC_CIDR` matches the cluster), plus `cluster_name = module.foundation.eks_cluster_name`
 and `region = module.foundation.region` — kube-ovn polls for its master node to
-register before installing (needs `aws`+`kubectl` on the apply host).
+register before installing (needs `aws`+`kubectl` on the apply host). Wire
+`wait_for_nodes_count = module.foundation.cni_node_size` too: if it undercounts the group the
+install races the nodes, and if it overcounts the poll hangs until `wait_for_nodes_timeout` and
+fails the apply.
 `cni = "custom"` installs any Helm-packaged CNI via `custom_chart`; layer extra
 values with `helm_set` / `helm_values`. See `modules/cni-bootstrap/README.md`.
 As a safety net, set `initial_node = { ..., timeouts = { create = "20m" } }` so a failed
@@ -337,6 +340,136 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 > hence opt-in. Applies only to the
 > module-created VPC; with `existing_vpc` you manage endpoints yourself.
 
+## Workload identity (Pod Identity / IRSA)
+
+This module creates IAM roles for six cluster workloads. It does **not** install the controllers
+themselves — it emits role ARNs and the GitOps layer wires them up.
+
+| Identity key | Namespace | Service account |
+| ------------ | --------- | --------------- |
+| `load_balancer_controller` | `alb` | `aws-load-balancer-controller` |
+| `ebs_csi_driver` | `kube-system` | `ebs-csi-driver` |
+| `s3_csi_driver` | `kube-system` | `s3-csi-driver` |
+| `external_dns` | `external-dns` | `external-dns-controller` |
+| `cert_manager` | `cert-manager` | `cert-manager` |
+| `karpenter` | `karpenter` | `karpenter` |
+
+Since v9, each identity gets an **EKS Pod Identity** role and association by default, plus the
+`eks-pod-identity-agent` addon. No `eks.amazonaws.com/role-arn` annotation is needed. The legacy
+IRSA roles still exist alongside them (they are removed in v10) — see
+[UPGRADING.md](UPGRADING.md) for the migration.
+
+Disable Pod Identity globally, or per identity:
+
+```hcl
+pod_identity = {
+  enabled = true                                    # default
+  overrides = {
+    cert_manager = { enabled = false }              # this identity stays on IRSA
+  }
+}
+```
+
+> **Pod Identity wins over an IRSA service account annotation.** If a workload must keep using its
+> annotation, you have to disable Pod Identity for that identity — removing the association is the
+> only thing that yields precedence back.
+
+Each identity exposes two outputs: `<identity>_role_arn` for the Pod Identity role (null when
+disabled) and `<identity>_irsa_role_arn` for the legacy IRSA role. The IRSA outputs are removed in
+v10. `karpenter_role_arn` is a single output for both mechanisms — Karpenter reuses one role.
+
+### Scoping Route53 access
+
+`cert_manager` and `external_dns` default to an unscoped Route53 grant. Narrow it with:
+
+```hcl
+pod_identity = {
+  overrides = {
+    cert_manager = { hosted_zone_arns = ["arn:aws:route53:::hostedzone/Z0123456789ABCDEFGHIJ"] }
+    external_dns = { hosted_zone_arns = ["arn:aws:route53:::hostedzone/Z0123456789ABCDEFGHIJ"] }
+  }
+}
+```
+
+This applies to the Pod Identity roles only. An identity left on IRSA — the GovCloud case below —
+keeps its own unscoped grant, because the IRSA roles are deliberately never modified. An empty list
+is rejected: it renders an IAM statement with no `Resource`. Omit the attribute to stay unscoped.
+
+### Cross-account DNS — same partition
+
+When the hosted zones live in another account in the *same* partition, use Pod Identity role
+chaining. The local role becomes a stub that assumes the target role, and the target role carries
+the Route53 permissions:
+
+```hcl
+pod_identity = {
+  overrides = {
+    external_dns = { target_role_arn = "arn:aws:iam::210987654321:role/dns-writer" }
+  }
+}
+```
+
+The target role's trust policy must allow `sts:AssumeRole` (and `sts:TagSession`, unless you set
+`disable_session_tags = true`) from `external_dns_role_arn`.
+
+### Cross-account DNS — GovCloud to commercial
+
+**Pod Identity cannot do this.** Role chaining is `sts:AssumeRole`, and IAM cannot express trust
+across partitions. IRSA can, because it is OIDC web-identity federation. Keep the DNS identities
+on IRSA:
+
+```hcl
+pod_identity = {
+  overrides = {
+    cert_manager = { enabled = false }
+    external_dns = { enabled = false }
+  }
+}
+```
+
+In the **commercial** account, register the GovCloud cluster's issuer and a role that trusts it:
+
+```hcl
+resource "aws_iam_openid_connect_provider" "gov_cluster" {
+  url             = "https://${module.foundation.eks_oidc_provider}"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [module.foundation.eks_cluster_tls_certificate_sha1_fingerprint]
+}
+
+data "aws_iam_policy_document" "cert_manager_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.gov_cluster.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${module.foundation.eks_oidc_provider}:sub"
+      values   = ["system:serviceaccount:cert-manager:cert-manager"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${module.foundation.eks_oidc_provider}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+```
+
+Then annotate the service account with the **commercial** role ARN. Nothing extra is needed in the
+GovCloud account — the gov-side OIDC provider plays no part in this flow.
+
+Two things that will otherwise cost you an afternoon:
+
+- **STS endpoint.** The pod identity webhook injects `AWS_STS_REGIONAL_ENDPOINTS=regional` and
+  `AWS_REGION=<gov region>`, so the SDK calls GovCloud STS with a commercial role ARN and fails.
+  Set `AWS_STS_REGIONAL_ENDPOINTS=global` (or an explicit commercial region) on the cert-manager
+  and external-dns containers.
+- **Egress.** These pods must reach commercial STS and Route53. VPC endpoints do not cross
+  partitions, so this needs real internet egress — relevant if you run a NAT-less topology via
+  `vpc_endpoints`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
@@ -356,13 +489,18 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | Name | Source | Version |
 | ---- | ------ | ------- |
 | <a name="module_cert_manager_irsa_role"></a> [cert\_manager\_irsa\_role](#module\_cert\_manager\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts | 6.8.0 |
+| <a name="module_cert_manager_pod_identity"></a> [cert\_manager\_pod\_identity](#module\_cert\_manager\_pod\_identity) | terraform-aws-modules/eks-pod-identity/aws | 2.8.2 |
 | <a name="module_ebs_csi_driver_irsa_role"></a> [ebs\_csi\_driver\_irsa\_role](#module\_ebs\_csi\_driver\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts | 6.8.0 |
+| <a name="module_ebs_csi_driver_pod_identity"></a> [ebs\_csi\_driver\_pod\_identity](#module\_ebs\_csi\_driver\_pod\_identity) | terraform-aws-modules/eks-pod-identity/aws | 2.8.2 |
 | <a name="module_eks"></a> [eks](#module\_eks) | terraform-aws-modules/eks/aws | 21.24.1 |
 | <a name="module_external_dns_irsa_role"></a> [external\_dns\_irsa\_role](#module\_external\_dns\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts | 6.8.0 |
-| <a name="module_fck_nat"></a> [fck\_nat](#module\_fck\_nat) | git::github.com/josmo/terraform-aws-fck-nat.git | v1.6.1-pre-josmo |
+| <a name="module_external_dns_pod_identity"></a> [external\_dns\_pod\_identity](#module\_external\_dns\_pod\_identity) | terraform-aws-modules/eks-pod-identity/aws | 2.8.2 |
+| <a name="module_fck_nat"></a> [fck\_nat](#module\_fck\_nat) | git::https://github.com/josmo/terraform-aws-fck-nat.git | v1.6.1-pre-josmo |
 | <a name="module_karpenter"></a> [karpenter](#module\_karpenter) | terraform-aws-modules/eks/aws//modules/karpenter | 21.24.1 |
 | <a name="module_load_balancer_controller_irsa_role"></a> [load\_balancer\_controller\_irsa\_role](#module\_load\_balancer\_controller\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts | 6.8.0 |
+| <a name="module_load_balancer_controller_pod_identity"></a> [load\_balancer\_controller\_pod\_identity](#module\_load\_balancer\_controller\_pod\_identity) | terraform-aws-modules/eks-pod-identity/aws | 2.8.2 |
 | <a name="module_s3_csi"></a> [s3\_csi](#module\_s3\_csi) | terraform-aws-modules/s3-bucket/aws | 5.15.3 |
+| <a name="module_s3_csi_driver_pod_identity"></a> [s3\_csi\_driver\_pod\_identity](#module\_s3\_csi\_driver\_pod\_identity) | terraform-aws-modules/eks-pod-identity/aws | 2.8.2 |
 | <a name="module_s3_driver_irsa_role"></a> [s3\_driver\_irsa\_role](#module\_s3\_driver\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts | 6.8.0 |
 | <a name="module_vpc"></a> [vpc](#module\_vpc) | terraform-aws-modules/vpc/aws | 6.6.1 |
 | <a name="module_vpc_endpoints"></a> [vpc\_endpoints](#module\_vpc\_endpoints) | terraform-aws-modules/vpc/aws//modules/vpc-endpoints | 6.6.1 |
@@ -376,6 +514,7 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | [aws_ssm_parameter.nat_tailscale_auth_key](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [aws_ami.main](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.pod_identity_target_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
@@ -385,14 +524,14 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_initial_node"></a> [initial\_node](#input\_initial\_node) | Initial (system) managed node group. instance\_types is required and must all be one architecture (the node AMI type is derived from them). taints/labels: leave null to derive from the cni profile merged with taints\_extra/labels\_extra (caller keys win); set to a map to replace the preset entirely ({} for none). force\_update\_version: evict through PodDisruptionBudgets when a version roll exhausts the per-node eviction window (escape hatch for PodEvictionFailure; pods blocked by a PDB are deleted). Default false. | <pre>object({<br/>    instance_types       = list(string)<br/>    enabled              = optional(bool, true)<br/>    min_size             = optional(number, 2)<br/>    max_size             = optional(number, 6)<br/>    desired_size         = optional(number, 3)<br/>    force_update_version = optional(bool, false)<br/>    taints               = optional(map(object({ key = string, value = string, effect = string })))<br/>    taints_extra         = optional(map(object({ key = string, value = string, effect = string })), {})<br/>    labels               = optional(map(string))<br/>    labels_extra         = optional(map(string), {})<br/>    timeouts = optional(object({<br/>      create = optional(string)<br/>      update = optional(string)<br/>      delete = optional(string)<br/>    }))<br/>  })</pre> | n/a | yes |
-| <a name="input_access"></a> [access](#input\_access) | IAM role ARNs granted cluster access. admin\_arns: cluster admins. admin\_ro\_arns: admin read only with secret and configmap access. ro\_arns: read only. Both *\_ro groups also get KMS readonly access for CI plan purposes; more limited access should use extra\_access\_entries. | <pre>object({<br/>    admin_arns    = optional(list(string), [])<br/>    admin_ro_arns = optional(list(string), [])<br/>    ro_arns       = optional(list(string), [])<br/>  })</pre> | `{}` | no |
-| <a name="input_addons"></a> [addons](#input\_addons) | Managed cluster addon toggles and overrides. vpc\_cni/kube\_proxy: leave null (default) to derive from the cni profile (vpc-cni: on for cni=vpc-cni; kube-proxy: off for cilium kube-proxy replacement); set true/false to force. When the vpc-cni addon is off, nodeadm maxPods=110 cloudinit is applied automatically. overrides: per-addon overrides keyed by addon name (e.g. "vpc-cni", "kube-proxy", "coredns") merged over module defaults — accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map. | <pre>object({<br/>    vpc_cni    = optional(bool)<br/>    kube_proxy = optional(bool)<br/>    coredns    = optional(bool, true)<br/>    overrides  = optional(any, {})<br/>  })</pre> | `{}` | no |
+| <a name="input_access"></a> [access](#input\_access) | IAM role ARNs granted cluster access. admin\_arns: cluster admins. admin\_ro\_arns: admin read only with secret and configmap access. ro\_arns: read only. KMS: admin\_arns AND admin\_ro\_arns are both granted KMS key *administrator* on the cluster secrets key — that includes kms:PutKeyPolicy and kms:ScheduleKeyDeletion, so admin\_ro\_arns is not read-only with respect to KMS and can self-escalate or schedule the key for deletion. ro\_arns receives no KMS access at all. For genuinely least-privilege access, use extra\_access\_entries instead of admin\_ro\_arns. | <pre>object({<br/>    admin_arns    = optional(list(string), [])<br/>    admin_ro_arns = optional(list(string), [])<br/>    ro_arns       = optional(list(string), [])<br/>  })</pre> | `{}` | no |
+| <a name="input_addons"></a> [addons](#input\_addons) | Managed cluster addon toggles and overrides. vpc\_cni/kube\_proxy: leave null (default) to derive from the cni profile (vpc-cni: on for cni=vpc-cni; kube-proxy: off for cilium kube-proxy replacement); set true/false to force. When the vpc-cni addon is off, nodeadm maxPods=110 cloudinit is applied automatically. pod\_identity\_agent: leave null (default) to enable whenever any identity uses Pod Identity; set true/false to force. overrides: per-addon overrides keyed by addon name (e.g. "vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent") merged over module defaults — accepts any attributes supported by terraform-aws-modules/eks/aws v21+ `addons` map. | <pre>object({<br/>    vpc_cni            = optional(bool)<br/>    kube_proxy         = optional(bool)<br/>    coredns            = optional(bool, true)<br/>    pod_identity_agent = optional(bool)<br/>    overrides          = optional(any, {})<br/>  })</pre> | `{}` | no |
 | <a name="input_cluster_enabled_log_types"></a> [cluster\_enabled\_log\_types](#input\_cluster\_enabled\_log\_types) | List of EKS control plane log types to enable. Valid values: api, audit, authenticator, controllerManager, scheduler. | `list(string)` | `[]` | no |
 | <a name="input_cluster_endpoint_public_access"></a> [cluster\_endpoint\_public\_access](#input\_cluster\_endpoint\_public\_access) | Whether the EKS cluster API server endpoint is publicly accessible. Set to false for private-only access (requires VPC connectivity). | `bool` | `true` | no |
 | <a name="input_cluster_version"></a> [cluster\_version](#input\_cluster\_version) | Kubernetes version to set for the cluster | `string` | `"1.35"` | no |
 | <a name="input_cni"></a> [cni](#input\_cni) | CNI profile driving the initial (system) node group taints/labels and vpc-cni/kube-proxy addon enablement. One of: cilium, kube-ovn, vpc-cni. For kube-ovn the system group carries the nidhogg gating taints, while the kube-ovn/role=master label + control-plane taint go to a dedicated CNI node group (the cni\_node variable). Override individual pieces with initial\_node.taints(\_extra)/labels(\_extra) and the addons toggles. | `string` | `"cilium"` | no |
 | <a name="input_cni_node"></a> [cni\_node](#input\_cni\_node) | Dedicated CNI node group (kube-ovn control plane). enabled: null derives from cni (true for kube-ovn, false otherwise); set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group. kubernetes\_version: version this group runs — bump to upgrade it; decoupled from cluster\_version so a control-plane bump doesn't auto-roll it (null follows cluster\_version, REQUIRED for cni="kube-ovn"); replace it deliberately via the recycle (toggle enabled + bump cni-bootstrap's bootstrap\_generation). instance\_types: null falls back to initial\_node.instance\_types; must all be one architecture. ami\_release\_version: pin the AMI release (e.g. a same-version security patch); null uses the default AMI for its kubernetes\_version. size: node count (min=max=desired); default 1 = a single kube-ovn ovn-central master. | <pre>object({<br/>    enabled             = optional(bool)<br/>    kubernetes_version  = optional(string)<br/>    instance_types      = optional(list(string))<br/>    ami_release_version = optional(string)<br/>    size                = optional(number, 1)<br/>  })</pre> | `{}` | no |
-| <a name="input_create"></a> [create](#input\_create) | should resources be created | `bool` | `true` | no |
+| <a name="input_create"></a> [create](#input\_create) | Create the EKS cluster and its IAM identities (cluster, node groups, addons, Karpenter, IRSA and Pod Identity roles). NOTE: this does NOT gate the surrounding infrastructure — the VPC, subnets, NAT instances, EIPs, Tailscale SSM parameters, VPC endpoints and the S3 CSI bucket are created regardless, gated by their own variables (existing\_vpc, pelotech\_nat, vpc\_endpoints, s3\_csi). Setting create = false plans successfully but still bills for those. | `bool` | `true` | no |
 | <a name="input_create_cluster_kms"></a> [create\_cluster\_kms](#input\_create\_cluster\_kms) | Should secrets be encrypted by kms in the cluster | `bool` | `true` | no |
 | <a name="input_create_node_security_group"></a> [create\_node\_security\_group](#input\_create\_node\_security\_group) | Whether to create a dedicated security group for EKS managed node groups. When true, the node\_security\_group\_id output is populated. | `bool` | `false` | no |
 | <a name="input_existing_vpc"></a> [existing\_vpc](#input\_existing\_vpc) | Use an existing VPC instead of creating one (null = create the VPC from the vpc variable) | <pre>object({<br/>    vpc_id     = string<br/>    subnet_ids = list(string)<br/>  })</pre> | `null` | no |
@@ -402,8 +541,9 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami\_owner\_id/ami\_name\_filter at your own image. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. auto\_rollout (default false): when enabled, a newer AMI matching ami\_name\_filter found at apply time triggers a rolling instance refresh on the NAT ASG (brief per-AZ NAT outage while the instance is replaced); leave false to recycle instances manually. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "aws-marketplace")<br/>    ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    auto_rollout    = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_pelotech_nat_tailscale_auth_key"></a> [pelotech\_nat\_tailscale\_auth\_key](#input\_pelotech\_nat\_tailscale\_auth\_key) | Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer pelotech\_nat.tailscale.auth\_key\_ssm with a pre-existing parameter). | `string` | `""` | no |
 | <a name="input_permissions_boundary"></a> [permissions\_boundary](#input\_permissions\_boundary) | IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition. | `string` | `""` | no |
+| <a name="input_pod_identity"></a> [pod\_identity](#input\_pod\_identity) | EKS Pod Identity for the workload identities this module creates (load\_balancer\_controller,<br/>ebs\_csi\_driver, s3\_csi\_driver, external\_dns, cert\_manager, karpenter).<br/><br/>When enabled, each identity gets its own Pod Identity role plus an association, and the<br/>`eks-pod-identity-agent` addon is installed. The legacy IRSA roles are left untouched and keep<br/>their own ARNs, so disabling an identity is a no-op on existing state.<br/><br/>NOTE: Pod Identity takes precedence over an `eks.amazonaws.com/role-arn` service account<br/>annotation. Disable an identity here to keep IRSA serving it.<br/><br/>overrides (keyed by identity name):<br/>  enabled              — false leaves the identity on IRSA (required in GovCloud for<br/>                         cert\_manager/external\_dns when the hosted zones live in a commercial<br/>                         account, since IAM cannot assume a role across partitions).<br/>  target\_role\_arn      — cross-account role chaining. The target role holds the permissions,<br/>                         so the predefined policy is replaced by an sts:AssumeRole grant.<br/>                         Same-partition only; not supported for karpenter.<br/>  disable\_session\_tags — passed through to the association. Not supported for karpenter.<br/>  hosted\_zone\_arns     — Route53 scoping for cert\_manager/external\_dns only. Null (default)<br/>                         keeps the historic unscoped grant. Applies to the Pod Identity role<br/>                         only: an identity left on IRSA keeps its own unscoped grant, because<br/>                         the IRSA roles are deliberately never modified. | <pre>object({<br/>    enabled = optional(bool, true)<br/>    overrides = optional(map(object({<br/>      enabled              = optional(bool)<br/>      target_role_arn      = optional(string)<br/>      disable_session_tags = optional(bool)<br/>      hosted_zone_arns     = optional(list(string))<br/>    })), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_pre_bootstrap_user_data"></a> [pre\_bootstrap\_user\_data](#input\_pre\_bootstrap\_user\_data) | Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages. | `string` | `null` | no |
-| <a name="input_s3_csi"></a> [s3\_csi](#input\_s3\_csi) | S3 CSI driver bucket access. create\_bucket: create a new bucket for use with the driver. bucket\_arns: existing buckets the driver should have access to. | <pre>object({<br/>    create_bucket = optional(bool, true)<br/>    bucket_arns   = optional(list(string), [])<br/>  })</pre> | `{}` | no |
+| <a name="input_s3_csi"></a> [s3\_csi](#input\_s3\_csi) | S3 CSI driver bucket access. create\_bucket: create a new bucket for use with the driver. bucket\_name: override the generated bucket name (default "<tags.Owner>-<name>-csi-bucket"); required if tags has no Owner key. bucket\_arns: existing buckets the driver should have access to. When create\_bucket is false and bucket\_arns is empty, no S3 policy is attached to the driver roles at all. | <pre>object({<br/>    create_bucket = optional(bool, true)<br/>    bucket_name   = optional(string)<br/>    bucket_arns   = optional(list(string), [])<br/>  })</pre> | `{}` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | tags to be added to the stack, should at least have Owner and Environment | `map(string)` | <pre>{<br/>  "Environment": "prod",<br/>  "Owner": "pelotech"<br/>}</pre> | no |
 | <a name="input_vpc"></a> [vpc](#input\_vpc) | Variables for defining the vpc for the stack (ignored when existing\_vpc is set) | <pre>object({<br/>    cidr             = string<br/>    azs              = list(string)<br/>    private_subnets  = list(string)<br/>    public_subnets   = list(string)<br/>    database_subnets = list(string)<br/>  })</pre> | <pre>{<br/>  "azs": [<br/>    "us-west-2a",<br/>    "us-west-2b",<br/>    "us-west-2c"<br/>  ],<br/>  "cidr": "172.16.0.0/16",<br/>  "database_subnets": [<br/>    "172.16.200.0/24",<br/>    "172.16.201.0/24",<br/>    "172.16.202.0/24"<br/>  ],<br/>  "private_subnets": [<br/>    "172.16.0.0/24",<br/>    "172.16.1.0/24",<br/>    "172.16.2.0/24"<br/>  ],<br/>  "public_subnets": [<br/>    "172.16.100.0/24",<br/>    "172.16.101.0/24",<br/>    "172.16.102.0/24"<br/>  ]<br/>}</pre> | no |
 | <a name="input_vpc_endpoints"></a> [vpc\_endpoints](#input\_vpc\_endpoints) | VPC endpoint service short-names to create (empty = none). s3/dynamodb are free Gateway endpoints; others are Interface endpoints. See the variable comment for the recommended set and cost. Internal VPC only. | `list(string)` | `[]` | no |
@@ -412,14 +552,18 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_cert_manager_role_arn"></a> [cert\_manager\_role\_arn](#output\_cert\_manager\_role\_arn) | ARN of the Cert Manager IRSA role |
+| <a name="output_cert_manager_irsa_role_arn"></a> [cert\_manager\_irsa\_role\_arn](#output\_cert\_manager\_irsa\_role\_arn) | ARN of the Cert Manager IRSA role (deprecated; removed in v10) |
+| <a name="output_cert_manager_role_arn"></a> [cert\_manager\_role\_arn](#output\_cert\_manager\_role\_arn) | ARN of the Cert Manager Pod Identity role |
 | <a name="output_cilium_k8s_service_host"></a> [cilium\_k8s\_service\_host](#output\_cilium\_k8s\_service\_host) | Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443. |
 | <a name="output_cluster_addons_enabled_resolved"></a> [cluster\_addons\_enabled\_resolved](#output\_cluster\_addons\_enabled\_resolved) | (introspection) Managed addon enablement after resolving cni and the addons.* overrides |
 | <a name="output_cluster_security_group_id"></a> [cluster\_security\_group\_id](#output\_cluster\_security\_group\_id) | Cluster security group that was created by Amazon EKS for the cluster |
 | <a name="output_cni_node_group_enabled"></a> [cni\_node\_group\_enabled](#output\_cni\_node\_group\_enabled) | (introspection) Whether the dedicated CNI node group is created (true for kube-ovn unless disabled). |
-| <a name="output_cni_node_labels_resolved"></a> [cni\_node\_labels\_resolved](#output\_cni\_node\_labels\_resolved) | (introspection) Labels applied to the dedicated CNI node group ({} when not created). |
-| <a name="output_cni_node_taints_resolved"></a> [cni\_node\_taints\_resolved](#output\_cni\_node\_taints\_resolved) | (introspection) Taints applied to the dedicated CNI node group ({} when not created). |
-| <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver IRSA role |
+| <a name="output_cni_node_labels_resolved"></a> [cni\_node\_labels\_resolved](#output\_cni\_node\_labels\_resolved) | (introspection) Labels the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
+| <a name="output_cni_node_size"></a> [cni\_node\_size](#output\_cni\_node\_size) | Size of the dedicated CNI node group. Wire this into the cni-bootstrap module's wait\_for\_nodes\_count — if the two disagree the bootstrap poll hangs until wait\_for\_nodes\_timeout and fails the apply. 0 when no CNI node group is created. |
+| <a name="output_cni_node_taints_resolved"></a> [cni\_node\_taints\_resolved](#output\_cni\_node\_taints\_resolved) | (introspection) Taints the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
+| <a name="output_database_subnet_group"></a> [database\_subnet\_group](#output\_database\_subnet\_group) | Name of the database subnet group created by this module (null when existing\_vpc is set) |
+| <a name="output_ebs_csi_driver_irsa_role_arn"></a> [ebs\_csi\_driver\_irsa\_role\_arn](#output\_ebs\_csi\_driver\_irsa\_role\_arn) | ARN of the EBS CSI driver IRSA role (deprecated; removed in v10) |
+| <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver Pod Identity role |
 | <a name="output_eks_cluster_certificate_authority_data"></a> [eks\_cluster\_certificate\_authority\_data](#output\_eks\_cluster\_certificate\_authority\_data) | Base64 encoded certificate data for the cluster |
 | <a name="output_eks_cluster_endpoint"></a> [eks\_cluster\_endpoint](#output\_eks\_cluster\_endpoint) | The endpoint for the EKS cluster API server |
 | <a name="output_eks_cluster_iam_role_name"></a> [eks\_cluster\_iam\_role\_name](#output\_eks\_cluster\_iam\_role\_name) | The name of the EKS cluster IAM role |
@@ -430,18 +574,29 @@ vpc_endpoints = ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "e
 | <a name="output_eks_managed_node_groups_autoscaling_group_names"></a> [eks\_managed\_node\_groups\_autoscaling\_group\_names](#output\_eks\_managed\_node\_groups\_autoscaling\_group\_names) | List of the autoscaling group names created by EKS managed node groups |
 | <a name="output_eks_oidc_provider"></a> [eks\_oidc\_provider](#output\_eks\_oidc\_provider) | The OpenID Connect identity provider (issuer URL without leading `https://`) |
 | <a name="output_eks_oidc_provider_arn"></a> [eks\_oidc\_provider\_arn](#output\_eks\_oidc\_provider\_arn) | EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band |
-| <a name="output_external_dns_role_arn"></a> [external\_dns\_role\_arn](#output\_external\_dns\_role\_arn) | ARN of the External DNS IRSA role |
+| <a name="output_external_dns_irsa_role_arn"></a> [external\_dns\_irsa\_role\_arn](#output\_external\_dns\_irsa\_role\_arn) | ARN of the External DNS IRSA role (deprecated; removed in v10) |
+| <a name="output_external_dns_role_arn"></a> [external\_dns\_role\_arn](#output\_external\_dns\_role\_arn) | ARN of the External DNS Pod Identity role |
 | <a name="output_initial_node_labels_resolved"></a> [initial\_node\_labels\_resolved](#output\_initial\_node\_labels\_resolved) | (introspection) Labels applied to the initial managed node group after resolving cni and initial\_node.labels(\_extra) |
 | <a name="output_initial_node_taints_resolved"></a> [initial\_node\_taints\_resolved](#output\_initial\_node\_taints\_resolved) | (introspection) Taints applied to the initial managed node group after resolving cni and initial\_node.taints(\_extra) |
 | <a name="output_karpenter_node_iam_role_name"></a> [karpenter\_node\_iam\_role\_name](#output\_karpenter\_node\_iam\_role\_name) | The name of the Karpenter node IAM role |
 | <a name="output_karpenter_queue_name"></a> [karpenter\_queue\_name](#output\_karpenter\_queue\_name) | The name of the Karpenter SQS queue |
-| <a name="output_karpenter_role_arn"></a> [karpenter\_role\_arn](#output\_karpenter\_role\_arn) | ARN of the Karpenter IRSA role |
+| <a name="output_karpenter_role_arn"></a> [karpenter\_role\_arn](#output\_karpenter\_role\_arn) | ARN of the Karpenter controller role. One role serves both mechanisms, so this is correct whether Karpenter uses Pod Identity or IRSA. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | The Amazon Resource Name (ARN) of the KMS key |
-| <a name="output_load_balancer_controller_role_arn"></a> [load\_balancer\_controller\_role\_arn](#output\_load\_balancer\_controller\_role\_arn) | ARN of the ALB controller IRSA role |
+| <a name="output_load_balancer_controller_irsa_role_arn"></a> [load\_balancer\_controller\_irsa\_role\_arn](#output\_load\_balancer\_controller\_irsa\_role\_arn) | ARN of the ALB controller IRSA role (deprecated; removed in v10) |
+| <a name="output_load_balancer_controller_role_arn"></a> [load\_balancer\_controller\_role\_arn](#output\_load\_balancer\_controller\_role\_arn) | ARN of the ALB controller Pod Identity role |
 | <a name="output_nat_tailscale_conf_resolved"></a> [nat\_tailscale\_conf\_resolved](#output\_nat\_tailscale\_conf\_resolved) | (introspection) Rendered tailscale fck-nat.conf lines per AZ ({} when tailscale is disabled). Only references the SSM parameter name, never the key value. |
 | <a name="output_node_security_group_id"></a> [node\_security\_group\_id](#output\_node\_security\_group\_id) | ID of the node shared security group |
+| <a name="output_pod_identity_associations_resolved"></a> [pod\_identity\_associations\_resolved](#output\_pod\_identity\_associations\_resolved) | (introspection) Namespace/service-account pairs each enabled identity is associated with, including any cross-account target\_role\_arn |
+| <a name="output_pod_identity_enabled_resolved"></a> [pod\_identity\_enabled\_resolved](#output\_pod\_identity\_enabled\_resolved) | (introspection) Per-identity Pod Identity enablement after resolving create, pod\_identity.enabled and pod\_identity.overrides |
+| <a name="output_pod_identity_hosted_zone_arns_resolved"></a> [pod\_identity\_hosted\_zone\_arns\_resolved](#output\_pod\_identity\_hosted\_zone\_arns\_resolved) | (introspection) Route53 hosted zone ARNs scoped onto the cert-manager and external-dns Pod Identity roles |
+| <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | IDs of the private subnets created by this module (empty when existing\_vpc is set) |
+| <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | IDs of the public subnets created by this module (empty when existing\_vpc is set) |
 | <a name="output_region"></a> [region](#output\_region) | The AWS region the stack is deployed in. Wire into the cni-bootstrap module's region so its node-registration poll can region-qualify the cluster. |
-| <a name="output_s3_csi_driver_role_arn"></a> [s3\_csi\_driver\_role\_arn](#output\_s3\_csi\_driver\_role\_arn) | ARN of the S3 CSI driver IRSA role |
-| <a name="output_vpc"></a> [vpc](#output\_vpc) | The vpc object when it's created |
-| <a name="output_vpc_endpoint_ids"></a> [vpc\_endpoint\_ids](#output\_vpc\_endpoint\_ids) | Map of created VPC endpoint ids (empty when vpc\_endpoints is empty). |
+| <a name="output_s3_csi_driver_irsa_role_arn"></a> [s3\_csi\_driver\_irsa\_role\_arn](#output\_s3\_csi\_driver\_irsa\_role\_arn) | ARN of the S3 CSI driver IRSA role (deprecated; removed in v10) |
+| <a name="output_s3_csi_driver_role_arn"></a> [s3\_csi\_driver\_role\_arn](#output\_s3\_csi\_driver\_role\_arn) | ARN of the S3 CSI driver Pod Identity role |
+| <a name="output_s3_csi_policy_attached_resolved"></a> [s3\_csi\_policy\_attached\_resolved](#output\_s3\_csi\_policy\_attached\_resolved) | (introspection) Whether the Mountpoint S3 policy is attached to the S3 CSI roles. False when no bucket is created and no bucket\_arns are supplied, which avoids the upstream fallback that would otherwise grant s3:ListBucket on every bucket in the account. |
+| <a name="output_vpc_azs"></a> [vpc\_azs](#output\_vpc\_azs) | Availability zones requested for the module-created VPC. NOTE: this echoes vpc.azs and is populated even when existing\_vpc is set. |
+| <a name="output_vpc_cidr_block"></a> [vpc\_cidr\_block](#output\_vpc\_cidr\_block) | CIDR block of the VPC created by this module (null when existing\_vpc is set) |
+| <a name="output_vpc_endpoints"></a> [vpc\_endpoints](#output\_vpc\_endpoints) | Map of created VPC endpoints, keyed by service short-name. Values are the full aws\_vpc\_endpoint resource objects, not bare IDs — use e.g. vpc\_endpoints["s3"].id. Empty when vpc\_endpoints is empty or existing\_vpc is set. |
+| <a name="output_vpc_id"></a> [vpc\_id](#output\_vpc\_id) | ID of the VPC created by this module (null when existing\_vpc is set) |
 <!-- END_TF_DOCS -->

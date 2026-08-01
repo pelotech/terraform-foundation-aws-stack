@@ -34,8 +34,18 @@ jobs:
           chmod +x "$tmpdir/hcledit"
           sudo mv "$tmpdir/hcledit" /usr/local/bin/hcledit
 
+      # Pinned rather than piping install_linux.sh from master into bash: this job later mints a
+      # write-capable app token, so an unpinned script from a moving branch is a supply-chain hole.
       - name: install tf-lint
-        run: curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+        env:
+          TFLINT_VERSION: v0.59.1
+        run: |
+          set -euo pipefail
+          tmpdir=$(mktemp -d)
+          curl -sSLo "$tmpdir/tflint.zip" "https://github.com/terraform-linters/tflint/releases/download/${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          unzip -q "$tmpdir/tflint.zip" -d "$tmpdir"
+          chmod +x "$tmpdir/tflint"
+          sudo mv "$tmpdir/tflint" /usr/local/bin/tflint
 
       - name: install tf-docs
         run: |
@@ -63,6 +73,19 @@ jobs:
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      # Runs before pre-commit so a formatting nit cannot short-circuit the job and hide a real
+      # test regression. Uses mock_provider throughout, so it needs no credentials and touches no
+      # state; -backend=false keeps init local.
+      - name: terraform test
+        run: |
+          set -euo pipefail
+          for dir in . modules/cni-bootstrap; do
+            echo "::group::terraform test ($dir)"
+            terraform -chdir="$dir" init -backend=false -input=false -no-color
+            terraform -chdir="$dir" test -no-color
+            echo "::endgroup::"
+          done
 
       # Runs on every event and is the required status check. On the docs commit
       # (run #2) this re-runs and lands a green check on the head SHA. Untrusted

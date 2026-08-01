@@ -3,6 +3,244 @@
 Breaking changes and migration steps between major versions, newest first.
 General usage documentation lives in the [README](README.md).
 
+## Upgrading to v9.0.0 (breaking changes)
+
+EKS Pod Identity replaces IRSA as the default credential mechanism for the identities this
+module creates. The IRSA roles are **not** modified or removed in v9 — new Pod Identity roles are
+created alongside them, and the migration is reversible with one flag. v10.0.0 will delete the
+IRSA roles.
+
+### ⚠️ Read this first if you run GovCloud with hosted zones in a commercial account
+
+**Pod Identity takes precedence over an `eks.amazonaws.com/role-arn` service account annotation.**
+If cert-manager and external-dns in your GovCloud cluster assume a role in a *commercial* account
+via IRSA, the default v9 behavior will shadow that annotation and DNS will start failing with
+`AccessDenied` against GovCloud Route53 at the next pod restart.
+
+Set the opt-out **in the same commit as the version bump**, not afterwards:
+
+```hcl
+module "foundation" {
+  # ...
+  pod_identity = {
+    overrides = {
+      cert_manager = { enabled = false }
+      external_dns = { enabled = false }
+    }
+  }
+}
+```
+
+This is not a temporary workaround. IAM cannot assume a role across partitions, so Pod Identity's
+cross-account path (`target_role_arn`) can never reach a commercial account from `aws-us-gov`.
+IRSA can, because it is OIDC web-identity federation: the commercial account registers an
+`aws_iam_openid_connect_provider` against your GovCloud cluster's issuer URL. Everything the
+commercial side needs is already exported — `eks_oidc_provider` (issuer URL without `https://`)
+and `eks_cluster_tls_certificate_sha1_fingerprint`. Nothing in the GovCloud account is required
+beyond leaving these two identities on IRSA.
+
+Every *other* identity (ALB controller, EBS CSI, S3 CSI, Karpenter) uses Pod Identity normally in
+GovCloud — the opt-out is per-identity, not cluster-wide.
+
+### Role ARNs change
+
+The five migrated identities get **new roles with new ARNs**. Nothing inside this module
+references them, but audit anything outside it that names the old ARN in a *resource* policy:
+KMS key policies, S3 bucket policies, or a cross-account trust policy in a DNS account.
+
+| Identity | IRSA role (still exists in v9) | New Pod Identity role |
+| -------- | ------------------------------ | --------------------- |
+| ALB controller | `${name}-alb-role` | `${name}-alb-pod-identity-role` |
+| EBS CSI | `${name}-ebs-csi-driver-role` | `${name}-ebs-csi-driver-pod-identity-role` |
+| S3 CSI | `${name}-s3-csi-driver-role` | `${name}-s3-csi-driver-pod-identity-role` |
+| external-dns | `${name}-external-dns-role` | `${name}-external-dns-pod-identity-role` |
+| cert-manager | `${name}-cert-manager-role` | `${name}-cert-manager-pod-identity-role` |
+| Karpenter | `${name}-karpenter-role` | *(unchanged — reuses the same role)* |
+
+Karpenter is the exception: its role already trusted `pods.eks.amazonaws.com`, so it keeps its ARN
+and only gains an association. `karpenter_role_arn` covers both mechanisms.
+
+### Output renames
+
+The `*_role_arn` names now point at the **Pod Identity** roles, and the legacy IRSA roles moved to
+`*_irsa_role_arn`. Doing this in v9 means v10 only *deletes* the IRSA outputs — you take one
+naming break instead of two.
+
+| v8 output | v9 output | Points at |
+| --------- | --------- | --------- |
+| `load_balancer_controller_role_arn` | `load_balancer_controller_irsa_role_arn` | IRSA role (deprecated) |
+| `ebs_csi_driver_role_arn` | `ebs_csi_driver_irsa_role_arn` | IRSA role (deprecated) |
+| `s3_csi_driver_role_arn` | `s3_csi_driver_irsa_role_arn` | IRSA role (deprecated) |
+| `external_dns_role_arn` | `external_dns_irsa_role_arn` | IRSA role (deprecated) |
+| `cert_manager_role_arn` | `cert_manager_irsa_role_arn` | IRSA role (deprecated) |
+| — | `load_balancer_controller_role_arn` | **Pod Identity role (new meaning)** |
+| — | `ebs_csi_driver_role_arn` | **Pod Identity role (new meaning)** |
+| — | `s3_csi_driver_role_arn` | **Pod Identity role (new meaning)** |
+| — | `external_dns_role_arn` | **Pod Identity role (new meaning)** |
+| — | `cert_manager_role_arn` | **Pod Identity role (new meaning)** |
+| `karpenter_role_arn` | `karpenter_role_arn` | unchanged — one role, both mechanisms |
+
+**The five reused names silently change meaning.** If you consume `cert_manager_role_arn` to write
+a service account annotation, it now resolves to the Pod Identity role — and returns `null` for any
+identity you disabled. GovCloud consumers keeping cert-manager and external-dns on IRSA must switch
+those references to `*_irsa_role_arn`.
+
+### What happens on first apply against an existing cluster
+
+For the five parallel identities the plan is **create-only** — no existing IAM role is modified or
+destroyed. Karpenter is the exception:
+
+- **+1 addon** — `eks-pod-identity-agent` (a DaemonSet; enabled automatically whenever any identity
+  uses Pod Identity, forceable with `addons.pod_identity_agent`)
+- **+5 IAM roles and policies** — the Pod Identity roles above
+- **+6 pod identity associations** — five from the new roles, one from the Karpenter submodule
+- **~1 IAM role trust policy modified** — Karpenter's (see below)
+- **0 changes** to the five IRSA roles
+
+Pods pick up the new credentials at their next restart, not at apply time.
+
+#### Karpenter is the exception — read before applying
+
+Karpenter has no parallel role. Enabling Pod Identity **modifies its existing role's trust policy
+in place**, dropping the `sts:AssumeRoleWithWebIdentity` statement in the same apply that creates
+the association and installs the agent addon. It is the one identity with no dual-mode window: for
+the interval between the trust policy changing and the agent DaemonSet becoming ready, Karpenter
+has neither mechanism and cannot provision nodes.
+
+This is normally seconds and self-heals, but if you cannot tolerate that window, stage it:
+
+```hcl
+# Apply 1 — install the agent, leave Karpenter on IRSA.
+pod_identity = { overrides = { karpenter = { enabled = false } } }
+
+# Apply 2 — once the eks-pod-identity-agent DaemonSet is Ready on every node.
+pod_identity = {}
+```
+
+### Rollback
+
+```hcl
+pod_identity = { enabled = false }
+```
+
+Apply, then restart the affected pods. For the five parallel identities this is complete and needs
+no IAM change, because their IRSA roles were never touched. For Karpenter the rollback *does*
+rewrite its trust policy — back to web-identity — so it is one apply, not zero.
+
+### After migrating
+
+Remove the `eks.amazonaws.com/role-arn` annotations from your Helm values / GitOps layer once
+Pod Identity is confirmed working. v10.0.0 deletes the IRSA roles and the `*_irsa_role_arn`
+outputs; the `*_role_arn` names are already final and will not change again.
+
+### `create = false` now plans
+
+`create = false` could never plan before v9. `load_balancer_controller_irsa_role` and
+`ebs_csi_driver_irsa_role` had no `count`, so they built a trust policy from a null
+`module.eks.oidc_provider_arn` and failed with `provider_arn is null`. Two smaller null-safety
+holes sat behind it: `data.aws_iam_policy_document.source` (Karpenter's web-identity trust)
+interpolated a null `module.eks.oidc_provider`, and the `cilium_k8s_service_host` output called
+`replace()` on a null cluster endpoint.
+
+All four are fixed. **No action is required for the default `create = true`.** Adding `count`
+re-keys those two roles from `module.x` to `module.x[0]`, and `moved.tf` carries the state across —
+no role is replaced and no ARN changes. `terraform plan` shows the moves as a no-op.
+
+**`create` does not gate the whole module.** It covers the cluster and its IAM identities — the
+EKS cluster, node groups, addons, Karpenter and every IRSA/Pod Identity role. It does **not** gate
+the surrounding infrastructure, which is still created and still billed:
+
+| Still created with `create = false` | Gated instead by |
+| ----------------------------------- | ---------------- |
+| VPC, subnets, route tables, internet/NAT gateways | `existing_vpc` |
+| NAT instances, EIPs, Tailscale SSM parameters | `pelotech_nat` |
+| VPC endpoints | `vpc_endpoints` |
+| S3 CSI bucket | `s3_csi.create_bucket` |
+
+To no-op the entire module, set those alongside `create = false`. The variable description now
+says this explicitly.
+
+Three outputs can now return `null` where they previously always had a value, but only when
+`create = false` (a configuration that could not plan at all before, so nothing can regress):
+`load_balancer_controller_irsa_role_arn`, `ebs_csi_driver_irsa_role_arn`, `cilium_k8s_service_host`.
+
+### Other breaking changes in v9.0.0
+
+**`var.dns` removed** — Route53 scoping moved into `pod_identity.overrides`, so per-identity
+settings all live in one place:
+
+```hcl
+# v9 (was: dns = { external_dns_hosted_zone_arns = [...] })
+pod_identity = {
+  overrides = {
+    external_dns = { hosted_zone_arns = ["arn:aws:route53:::hostedzone/Z1"] }
+  }
+}
+```
+
+Only valid for `cert_manager` and `external_dns`, and an empty list is now rejected — it rendered
+an IAM statement with no `Resource`. Omit the attribute to keep the unscoped grant. Scoping applies
+to the Pod Identity role only; an identity left on IRSA keeps its own unscoped grant, because the
+IRSA roles are deliberately never modified.
+
+**`output "vpc"` replaced.** It re-exported all 119 outputs of `terraform-aws-modules/vpc` as this
+module's public API, which made any upstream major a silent breaking change here. Replaced with
+named outputs:
+
+| Was | Now |
+| --- | --- |
+| `vpc.vpc_id` | `vpc_id` |
+| `vpc.vpc_cidr_block` | `vpc_cidr_block` |
+| `vpc.azs` | `vpc_azs` |
+| `vpc.private_subnets` | `private_subnet_ids` |
+| `vpc.public_subnets` | `public_subnet_ids` |
+| `vpc.database_subnet_group` | `database_subnet_group` |
+
+Need something else off the VPC module? Open an issue rather than reaching through — that is the
+coupling this change removes.
+
+**`vpc_endpoint_ids` renamed to `vpc_endpoints`.** The value was never IDs; it is a map of full
+`aws_vpc_endpoint` objects keyed by service short-name. Use `vpc_endpoints["s3"].id`.
+
+**Node group sizing is now a hard error.** `initial_node` min/desired/max agreement was a `check`
+block, which only emits a *warning* — an invalid sizing reached the AWS API and failed there.
+It is now a variable `validation`, so it fails at plan.
+
+**New input validations** reject configurations that previously failed deep in the plan with an
+opaque error, or silently misbehaved:
+
+- `pelotech_nat.enabled` (or `create_eip`) combined with `existing_vpc` — the module can only place
+  NAT instances in subnets and route tables it created. Previously an index-out-of-range.
+- `vpc.azs` longer than `vpc.public_subnets` or `vpc.private_subnets` — same index crash.
+- `tags` without an `Owner` key and no `s3_csi.bucket_name` — `Owner` was an undeclared required
+  key feeding an S3 bucket name. `s3_csi.bucket_name` is a new escape hatch, and is validated
+  against S3's lowercase/3-63-character naming rules.
+- `cni_node.size` of 0, and an empty `cni_node.instance_types`.
+
+**S3 CSI policy is skipped when there are no buckets.** With `s3_csi = { create_bucket = false }`
+and no `bucket_arns`, the upstream policy fell back to granting `s3:ListBucket` on
+`arn:aws:s3:::*` — every bucket in the account. The policy is now simply not attached.
+
+### Corrected documentation (no behavior change)
+
+- **`access` and KMS.** The description claimed both `*_ro` groups get "KMS readonly access". They
+  do not. `admin_arns` **and** `admin_ro_arns` are both granted KMS key *administrator* on the
+  cluster secrets key — which includes `kms:PutKeyPolicy` and `kms:ScheduleKeyDeletion` — and
+  `ro_arns` gets no KMS access at all. Behavior is unchanged in v9; only the description is now
+  accurate. **If you rely on `admin_ro_arns` being read-only, it is not** — use
+  `extra_access_entries` for least-privilege access.
+- **Access entry keys are positional.** `access.*_arns` entries are keyed by list index, so
+  removing or reordering an ARN mid-list destroys and recreates every access entry after it.
+  Append new ARNs at the end.
+- **`cni_node_taints_resolved` / `cni_node_labels_resolved`** are derived from the CNI profile
+  alone and stay populated even when the node group is not created. Use `cni_node_group_enabled`.
+
+### New: `cni_node_size` output
+
+Wire it into the `cni-bootstrap` module's `wait_for_nodes_count`. If the two disagree the
+bootstrap poll hangs until `wait_for_nodes_timeout` and fails the apply; previously the number had
+to be copied by hand.
+
 ## Upgrading to v8.0.0 (breaking changes)
 
 ### Interface rename & regrouping

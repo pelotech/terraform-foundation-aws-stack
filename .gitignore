@@ -1,6 +1,11 @@
 # Local .terraform directories
 **/.terraform/*
 
+# Provider lock files. This is a reusable module, not a root module: pinning providers here would
+# constrain every consumer. CI regenerates them via `terraform init` for `terraform test`.
+.terraform.lock.hcl
+**/.terraform.lock.hcl
+
 # .tfstate files
 *.tfstate
 *.tfstate.*

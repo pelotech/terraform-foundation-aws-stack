@@ -35,8 +35,12 @@ repos:
         - '--args=--skip-dirs=**/.terraform'
         # Use the checks embedded in the pinned Trivy binary instead of pulling
         # the latest trivy-checks bundle (which can advance past the binary and
-        # fail to load — breaks CI on an empty cache). New checks arrive via
-        # Renovate Trivy bumps.
+        # fail to load — breaks CI on an empty cache).
+        #
+        # CAVEAT: this pins the check database to whatever shipped in the Trivy binary, and that
+        # binary's version is a `version:` INPUT to setup-trivy in pre-commit.yaml, not a `uses:`
+        # ref — so Renovate's github-actions manager does not see it. New checks therefore arrive
+        # only when someone bumps that input by hand.
         - '--args=--skip-check-update'
     - id: terraform_tflint
       args:

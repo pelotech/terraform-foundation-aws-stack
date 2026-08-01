@@ -128,12 +128,12 @@ module "cni_bootstrap" {
 }
 ```
 
-> Installs the OCI chart `oci://ghcr.io/pelotech/charts/kube-ovn` at `v1.13.9`
-> (release name `kube-ovn`, 15m/900s default timeout) with pinger/resource
+> Installs the OCI chart `oci://ghcr.io/pelotech/charts/kube-ovn` at the version pinned in
+> `main.tf` (release name `kube-ovn`, 15m/900s default timeout) with pinger/resource
 > defaults baked in. **`ipv4.SVC_CIDR` comes from `service_cidr`** — wire the
 > foundation `eks_cluster_service_cidr` output so it matches the cluster's actual
 > service CIDR (set `service_cidr = ""` to omit it). Before installing, it waits
-> for the `kube-ovn/role=master` node (set by `stack_cni = "kube-ovn"`) to
+> for the `kube-ovn/role=master` node (set by `cni = "kube-ovn"`) to
 > register — hence the required `cluster_name`/`region` and the `aws`+`kubectl`
 > dependency. `helm`'s `--force-conflicts` (used on in-place kube-ovn upgrades)
 > has no Terraform provider equivalent; it's a no-op on the initial bootstrap
@@ -186,7 +186,7 @@ No modules.
 | <a name="input_replace"></a> [replace](#input\_replace) | Reuse a release name whose existing release is failed/pending/deleted-in-history (helm install --replace) — lets a repair reclaim a stuck name without a manual `helm uninstall`. Does NOT adopt a healthy deployed release (use `terraform import`). Marked unsafe for production by Helm. | `bool` | `false` | no |
 | <a name="input_service_cidr"></a> [service\_cidr](#input\_service\_cidr) | Kubernetes service CIDR for kube-ovn (ipv4.SVC\_CIDR). Required for kube-ovn — wire from the foundation module's eks\_cluster\_service\_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom. | `string` | `""` | no |
 | <a name="input_wait_for_nodes"></a> [wait\_for\_nodes](#input\_wait\_for\_nodes) | Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster\_name + region. | `bool` | `null` | no |
-| <a name="input_wait_for_nodes_count"></a> [wait\_for\_nodes\_count](#input\_wait\_for\_nodes\_count) | Minimum number of registered nodes matching the selector before install proceeds. Default 1 matches the dedicated CNI node group's default size (foundation cni\_node\_size); set this to your CNI node group's size, or the poll hangs until wait\_for\_nodes\_timeout and fails the apply. | `number` | `1` | no |
+| <a name="input_wait_for_nodes_count"></a> [wait\_for\_nodes\_count](#input\_wait\_for\_nodes\_count) | Minimum number of registered nodes matching the selector before install proceeds. Default 1 matches the dedicated CNI node group's default size; wire this to the foundation module's cni\_node\_size output, or the poll hangs until wait\_for\_nodes\_timeout and fails the apply. | `number` | `1` | no |
 | <a name="input_wait_for_nodes_selector"></a> [wait\_for\_nodes\_selector](#input\_wait\_for\_nodes\_selector) | Label selector the node-registration poll waits on. null derives per-CNI (kube-ovn "kube-ovn/role=master"; otherwise empty = any node). | `string` | `null` | no |
 | <a name="input_wait_for_nodes_timeout"></a> [wait\_for\_nodes\_timeout](#input\_wait\_for\_nodes\_timeout) | Seconds the node-registration poll waits before failing. | `number` | `600` | no |
 | <a name="input_wait_timeout"></a> [wait\_timeout](#input\_wait\_timeout) | Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 900s/15m). | `number` | `null` | no |

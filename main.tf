@@ -1,13 +1,6 @@
 data "aws_partition" "current" {}
 data "aws_caller_identity" "current" {}
 
-check "initial_node_group_sizing" {
-  assert {
-    condition     = var.initial_node.min_size <= var.initial_node.desired_size && var.initial_node.desired_size <= var.initial_node.max_size
-    error_message = "initial_node sizes must satisfy: min (${var.initial_node.min_size}) <= desired (${var.initial_node.desired_size}) <= max (${var.initial_node.max_size})."
-  }
-}
-
 locals {
   permissions_boundary_arn = var.permissions_boundary != "" ? "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}" : null
   is_arm                   = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.pelotech_nat.instance_type))
@@ -16,9 +9,14 @@ locals {
   # a1 family (no "g") is not detected. initial_node.instance_types validates arch
   # agreement, so index [0] is representative.
   initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_node.instance_types[0]))
-  # One expansion for the three managed access groups. The map keys ("admin_0",
-  # "admin_ro_0", "ro_0", ...) and association keys are state addresses inside the
-  # EKS module's for_each — keep them stable to avoid access-entry churn.
+  # One expansion for the three managed access groups. The map keys ("admin_0", "admin_ro_0",
+  # "ro_0", ...) and association keys are state addresses inside the EKS module's for_each.
+  #
+  # WARNING: these keys are POSITIONAL. Removing or reordering an ARN in the middle of one of the
+  # access.*_arns lists re-keys every entry after it, which destroys and recreates those access
+  # entries. Append new ARNs to the end of a list; when removing one, expect churn for the
+  # entries that follow it. A duplicate ARN across groups also collides server-side (EKS keys
+  # access entries by principal ARN) and fails with ResourceInUseException.
   access_entry_groups = {
     admin    = { arns = var.access.admin_arns, assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
     admin_ro = { arns = var.access.admin_ro_arns, assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
@@ -43,6 +41,43 @@ locals {
     for index, item in var.extra_access_entries : "extra_${index}" => item
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
+
+  # Workload identities served by this module. These namespace/service-account pairs are the
+  # contract with the consumer's GitOps layer: they are deliberately NOT the upstream chart
+  # defaults (kube-system:ebs-csi-driver, not ebs-csi-controller-sa; alb, not kube-system), and
+  # they must match what the legacy IRSA roles already trust or an association silently misses.
+  pod_identity_identities = {
+    load_balancer_controller = { namespace = "alb", service_account = "aws-load-balancer-controller" }
+    ebs_csi_driver           = { namespace = "kube-system", service_account = "ebs-csi-driver" }
+    s3_csi_driver            = { namespace = "kube-system", service_account = "s3-csi-driver" }
+    external_dns             = { namespace = "external-dns", service_account = "external-dns-controller" }
+    cert_manager             = { namespace = "cert-manager", service_account = "cert-manager" }
+    karpenter                = { namespace = "karpenter", service_account = "karpenter" }
+  }
+
+  # Per-identity override wins; otherwise the global toggle. Disabling an identity creates no Pod
+  # Identity role and no association, leaving its IRSA role to keep serving the workload.
+  pod_identity_enabled = {
+    for k, v in local.pod_identity_identities : k =>
+    var.create && coalesce(try(var.pod_identity.overrides[k].enabled, null), var.pod_identity.enabled)
+  }
+
+  pod_identity_target_role_arns = {
+    for k, v in local.pod_identity_identities : k =>
+    local.pod_identity_enabled[k] ? try(var.pod_identity.overrides[k].target_role_arn, null) : null
+  }
+
+  # Route53 scoping for the DNS identities. Null (unset) keeps the historic unscoped grant.
+  pod_identity_hosted_zone_arns = {
+    for k in ["cert_manager", "external_dns"] : k =>
+    try(var.pod_identity.overrides[k].hosted_zone_arns, null) != null ? var.pod_identity.overrides[k].hosted_zone_arns : ["*"]
+  }
+
+  # An empty ARN list makes the upstream mountpoint policy fall back to arn:<partition>:s3:::* for
+  # s3:ListBucket and emit an empty-Resource statement for object access. Skip the policy instead.
+  # Derived from the inputs rather than local.s3_csi_arns: the created bucket's ARN is unknown at
+  # plan time, and this value gates a count inside the upstream policy module.
+  attach_s3_csi_policy = var.s3_csi.create_bucket || length(var.s3_csi.bucket_arns) > 0
 
   # OVERWRITE on create lets AWS adopt any pre-existing self-managed daemonsets into the managed-addons API.
   # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately.
@@ -74,6 +109,14 @@ locals {
           }
         ]
       })
+    }
+    # Required for Pod Identity: the agent vends credentials to pods over a link-local address.
+    # Without it, associations exist but pods get nothing.
+    "eks-pod-identity-agent" = {
+      most_recent                 = true
+      preserve                    = false
+      resolve_conflicts_on_create = "OVERWRITE"
+      resolve_conflicts_on_update = "OVERWRITE"
     }
   }
   # CNI profiles: var.cni selects the taints/labels and vpc-cni/kube-proxy addon
@@ -174,10 +217,14 @@ locals {
   enable_vpc_cni_addon    = var.addons.vpc_cni != null ? var.addons.vpc_cni : local.cni_profile.enable_vpc_cni_addon
   enable_kube_proxy_addon = var.addons.kube_proxy != null ? var.addons.kube_proxy : local.cni_profile.enable_kube_proxy_addon
 
+  # Explicit bool wins; null = on whenever at least one identity uses Pod Identity.
+  enable_pod_identity_agent = var.addons.pod_identity_agent != null ? var.addons.pod_identity_agent : anytrue(values(local.pod_identity_enabled))
+
   cluster_addons_enabled = {
-    "vpc-cni"    = local.enable_vpc_cni_addon
-    "kube-proxy" = local.enable_kube_proxy_addon
-    "coredns"    = var.addons.coredns
+    "vpc-cni"                = local.enable_vpc_cni_addon
+    "kube-proxy"             = local.enable_kube_proxy_addon
+    "coredns"                = var.addons.coredns
+    "eks-pod-identity-agent" = local.enable_pod_identity_agent
   }
   cluster_addons = {
     for name, enabled in local.cluster_addons_enabled : name =>
@@ -319,10 +366,16 @@ resource "aws_eip" "main" {
 }
 
 module "fck_nat" {
-  # fork till https://github.com/RaJiska/terraform-aws-fck-nat/pull/84 is released
-  source = "git::github.com/josmo/terraform-aws-fck-nat.git?ref=v1.6.1-pre-josmo"
-  # source             = "RaJiska/fck-nat/aws"
-  # version            = "1.6.0"
+  # Temporary fork carrying https://github.com/RaJiska/terraform-aws-fck-nat/pull/84 (derive the
+  # partition and DNS suffix for IAM ARNs and the service principal) — required for GovCloud.
+  #
+  # REVERT TRIGGER: PR #84 merged 2026-08-01, so the blocker is no longer the PR but the release.
+  # Check for an upstream tag >= v1.6.1; when one exists, restore:
+  #     source  = "RaJiska/fck-nat/aws"
+  #     version = ">= 1.6.1"
+  # and delete this fork. Renovate cannot see this dependency: the git:: source with a non-semver
+  # tag is invisible to its datasources, so nothing will nag us automatically.
+  source             = "git::https://github.com/josmo/terraform-aws-fck-nat.git?ref=v1.6.1-pre-josmo"
   count              = var.pelotech_nat.enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
   name               = "${var.name}-${module.vpc.azs[count.index]}"
@@ -454,7 +507,14 @@ module "eks" {
     "karpenter.sh/discovery" = var.name
   })
 }
+# Karpenter is the one identity that needs no parallel role: the upstream submodule always emits a
+# `pods.eks.amazonaws.com` trust statement, so its existing role already works with Pod Identity.
+# This doc bolts web-identity on top and is dropped once the association takes over.
 data "aws_iam_policy_document" "source" { # allow usage with irsa
+  # Gated on var.create: module.eks.oidc_provider is null when the cluster is not created, and
+  # interpolating it into the condition variables below fails at plan time.
+  count = var.create ? 1 : 0
+
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     condition {
@@ -474,25 +534,31 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
   }
 }
 module "karpenter" {
-  count                                   = var.create ? 1 : 0
-  source                                  = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version                                 = "21.24.1"
-  enable_inline_policy                    = true
-  cluster_name                            = module.eks.cluster_name
-  queue_name                              = var.name
-  node_iam_role_name                      = "KarpenterNodeRole-${var.name}"
-  iam_role_name                           = "${var.name}-karpenter-role"
-  iam_role_use_name_prefix                = false
-  node_iam_role_use_name_prefix           = false
-  create_pod_identity_association         = false
+  count                           = var.create ? 1 : 0
+  source                          = "terraform-aws-modules/eks/aws//modules/karpenter"
+  version                         = "21.24.1"
+  enable_inline_policy            = true
+  cluster_name                    = module.eks.cluster_name
+  queue_name                      = var.name
+  node_iam_role_name              = "KarpenterNodeRole-${var.name}"
+  iam_role_name                   = "${var.name}-karpenter-role"
+  iam_role_use_name_prefix        = false
+  node_iam_role_use_name_prefix   = false
+  create_pod_identity_association = local.pod_identity_enabled["karpenter"]
+  # MUST be set explicitly: the submodule defaults to namespace "kube-system", but this stack runs
+  # Karpenter in the "karpenter" namespace (see the web-identity :sub condition above). Taking the
+  # default would associate a service account that does not exist and silently strand Karpenter.
+  namespace                               = local.pod_identity_identities["karpenter"].namespace
+  service_account                         = local.pod_identity_identities["karpenter"].service_account
   iam_role_permissions_boundary_arn       = local.permissions_boundary_arn
   node_iam_role_permissions_boundary      = local.permissions_boundary_arn
-  iam_role_source_assume_policy_documents = [data.aws_iam_policy_document.source.json]
+  iam_role_source_assume_policy_documents = local.pod_identity_enabled["karpenter"] ? [] : data.aws_iam_policy_document.source[*].json
   tags                                    = var.tags
 }
 
 # IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
+  count   = var.create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -513,6 +579,7 @@ module "load_balancer_controller_irsa_role" {
 }
 
 module "ebs_csi_driver_irsa_role" {
+  count   = var.create ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -535,7 +602,8 @@ module "ebs_csi_driver_irsa_role" {
 module "s3_csi" {
   source  = "terraform-aws-modules/s3-bucket/aws"
   version = "5.15.3"
-  bucket  = "${var.tags.Owner}-${var.name}-csi-bucket"
+  # var.s3_csi validates that bucket_name is set or tags has an Owner key, so this cannot crash.
+  bucket = coalesce(var.s3_csi.bucket_name, "${try(var.tags.Owner, "")}-${var.name}-csi-bucket")
 
   create_bucket                         = var.s3_csi.create_bucket
   attach_deny_insecure_transport_policy = true
@@ -562,7 +630,7 @@ module "s3_driver_irsa_role" {
   name            = "${var.name}-s3-csi-driver-role"
   policy_name     = "AmazonEKS_Mountpoint_S3_CSI-${var.name}"
 
-  attach_mountpoint_s3_csi_policy = true
+  attach_mountpoint_s3_csi_policy = local.attach_s3_csi_policy
   mountpoint_s3_csi_bucket_arns   = local.s3_csi_arns
   mountpoint_s3_csi_path_arns     = [for arn in local.s3_csi_arns : "${arn}/*"]
   oidc_providers = {
@@ -618,4 +686,177 @@ module "cert_manager_irsa_role" {
   }
   permissions_boundary = local.permissions_boundary_arn
   tags                 = var.tags
+}
+
+################################################################################
+# Pod Identity roles and associations
+#
+# These live alongside the IRSA roles above rather than replacing them, so for the five identities
+# below the upgrade is create-only and a rollback (pod_identity.enabled = false) needs no IAM
+# change. The role ARNs differ from the IRSA ones — audit any external resource policy naming the
+# old ARN.
+#
+# Karpenter is the exception: it has no parallel role, so enabling Pod Identity MODIFIES its
+# existing role's trust policy (dropping the web-identity statement) in the same apply that creates
+# the association. It is the one identity with no dual-mode window. See UPGRADING.md.
+#
+# Beware: the input names here are NOT the same as the IRSA module's. This module uses
+# `permissions_boundary_arn`, `attach_aws_lb_controller_policy`, `attach_aws_ebs_csi_policy`,
+# `mountpoint_s3_csi_bucket_path_arns`, and exports `iam_role_arn` (not `arn`).
+################################################################################
+
+# Cross-account chaining: the local role only needs to assume the role that owns the target
+# resources. That target role carries the permissions, so the predefined policy is suppressed and
+# replaced by this grant. Same-partition only — IAM cannot assume a role across partitions, which
+# is why GovCloud clusters fall back to IRSA for commercial-account Route53.
+data "aws_iam_policy_document" "pod_identity_target_role" {
+  for_each = { for k, v in local.pod_identity_target_role_arns : k => v if v != null }
+
+  statement {
+    sid       = "AssumeTargetRole"
+    actions   = ["sts:AssumeRole", "sts:TagSession"]
+    resources = [each.value]
+  }
+}
+
+module "load_balancer_controller_pod_identity" {
+  count   = local.pod_identity_enabled["load_balancer_controller"] ? 1 : 0
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.8.2"
+
+  use_name_prefix               = false
+  name                          = "${var.name}-alb-pod-identity-role"
+  aws_lb_controller_policy_name = "AmazonEKS_AWS_Load_Balancer_Controller_PodIdentity-${var.name}"
+
+  attach_aws_lb_controller_policy = local.pod_identity_target_role_arns["load_balancer_controller"] == null
+  attach_custom_policy            = local.pod_identity_target_role_arns["load_balancer_controller"] != null
+  source_policy_documents         = try([data.aws_iam_policy_document.pod_identity_target_role["load_balancer_controller"].json], [])
+
+  associations = {
+    cluster = {
+      cluster_name         = module.eks.cluster_name
+      namespace            = local.pod_identity_identities["load_balancer_controller"].namespace
+      service_account      = local.pod_identity_identities["load_balancer_controller"].service_account
+      target_role_arn      = local.pod_identity_target_role_arns["load_balancer_controller"]
+      disable_session_tags = try(var.pod_identity.overrides["load_balancer_controller"].disable_session_tags, null)
+    }
+  }
+
+  permissions_boundary_arn = local.permissions_boundary_arn
+  tags                     = var.tags
+}
+
+module "ebs_csi_driver_pod_identity" {
+  count   = local.pod_identity_enabled["ebs_csi_driver"] ? 1 : 0
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.8.2"
+
+  use_name_prefix         = false
+  name                    = "${var.name}-ebs-csi-driver-pod-identity-role"
+  aws_ebs_csi_policy_name = "AmazonEKS_EBS_CSI_PodIdentity-${var.name}"
+
+  attach_aws_ebs_csi_policy = local.pod_identity_target_role_arns["ebs_csi_driver"] == null
+  attach_custom_policy      = local.pod_identity_target_role_arns["ebs_csi_driver"] != null
+  source_policy_documents   = try([data.aws_iam_policy_document.pod_identity_target_role["ebs_csi_driver"].json], [])
+
+  associations = {
+    cluster = {
+      cluster_name         = module.eks.cluster_name
+      namespace            = local.pod_identity_identities["ebs_csi_driver"].namespace
+      service_account      = local.pod_identity_identities["ebs_csi_driver"].service_account
+      target_role_arn      = local.pod_identity_target_role_arns["ebs_csi_driver"]
+      disable_session_tags = try(var.pod_identity.overrides["ebs_csi_driver"].disable_session_tags, null)
+    }
+  }
+
+  permissions_boundary_arn = local.permissions_boundary_arn
+  tags                     = var.tags
+}
+
+module "s3_csi_driver_pod_identity" {
+  count   = local.pod_identity_enabled["s3_csi_driver"] ? 1 : 0
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.8.2"
+
+  use_name_prefix               = false
+  name                          = "${var.name}-s3-csi-driver-pod-identity-role"
+  mountpoint_s3_csi_policy_name = "AmazonEKS_Mountpoint_S3_CSI_PodIdentity-${var.name}"
+
+  attach_mountpoint_s3_csi_policy    = local.pod_identity_target_role_arns["s3_csi_driver"] == null && local.attach_s3_csi_policy
+  mountpoint_s3_csi_bucket_arns      = local.s3_csi_arns
+  mountpoint_s3_csi_bucket_path_arns = [for arn in local.s3_csi_arns : "${arn}/*"]
+
+  attach_custom_policy    = local.pod_identity_target_role_arns["s3_csi_driver"] != null
+  source_policy_documents = try([data.aws_iam_policy_document.pod_identity_target_role["s3_csi_driver"].json], [])
+
+  associations = {
+    cluster = {
+      cluster_name         = module.eks.cluster_name
+      namespace            = local.pod_identity_identities["s3_csi_driver"].namespace
+      service_account      = local.pod_identity_identities["s3_csi_driver"].service_account
+      target_role_arn      = local.pod_identity_target_role_arns["s3_csi_driver"]
+      disable_session_tags = try(var.pod_identity.overrides["s3_csi_driver"].disable_session_tags, null)
+    }
+  }
+
+  permissions_boundary_arn = local.permissions_boundary_arn
+  tags                     = var.tags
+}
+
+module "external_dns_pod_identity" {
+  count   = local.pod_identity_enabled["external_dns"] ? 1 : 0
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.8.2"
+
+  use_name_prefix          = false
+  name                     = "${var.name}-external-dns-pod-identity-role"
+  external_dns_policy_name = "AmazonEKS_External_DNS_PodIdentity-${var.name}"
+
+  attach_external_dns_policy    = local.pod_identity_target_role_arns["external_dns"] == null
+  external_dns_hosted_zone_arns = local.pod_identity_hosted_zone_arns["external_dns"]
+
+  attach_custom_policy    = local.pod_identity_target_role_arns["external_dns"] != null
+  source_policy_documents = try([data.aws_iam_policy_document.pod_identity_target_role["external_dns"].json], [])
+
+  associations = {
+    cluster = {
+      cluster_name         = module.eks.cluster_name
+      namespace            = local.pod_identity_identities["external_dns"].namespace
+      service_account      = local.pod_identity_identities["external_dns"].service_account
+      target_role_arn      = local.pod_identity_target_role_arns["external_dns"]
+      disable_session_tags = try(var.pod_identity.overrides["external_dns"].disable_session_tags, null)
+    }
+  }
+
+  permissions_boundary_arn = local.permissions_boundary_arn
+  tags                     = var.tags
+}
+
+module "cert_manager_pod_identity" {
+  count   = local.pod_identity_enabled["cert_manager"] ? 1 : 0
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.8.2"
+
+  use_name_prefix          = false
+  name                     = "${var.name}-cert-manager-pod-identity-role"
+  cert_manager_policy_name = "AmazonEKS_Cert_Manager_PodIdentity-${var.name}"
+
+  attach_cert_manager_policy    = local.pod_identity_target_role_arns["cert_manager"] == null
+  cert_manager_hosted_zone_arns = local.pod_identity_hosted_zone_arns["cert_manager"]
+
+  attach_custom_policy    = local.pod_identity_target_role_arns["cert_manager"] != null
+  source_policy_documents = try([data.aws_iam_policy_document.pod_identity_target_role["cert_manager"].json], [])
+
+  associations = {
+    cluster = {
+      cluster_name         = module.eks.cluster_name
+      namespace            = local.pod_identity_identities["cert_manager"].namespace
+      service_account      = local.pod_identity_identities["cert_manager"].service_account
+      target_role_arn      = local.pod_identity_target_role_arns["cert_manager"]
+      disable_session_tags = try(var.pod_identity.overrides["cert_manager"].disable_session_tags, null)
+    }
+  }
+
+  permissions_boundary_arn = local.permissions_boundary_arn
+  tags                     = var.tags
 }

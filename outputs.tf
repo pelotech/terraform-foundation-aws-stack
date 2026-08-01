@@ -18,9 +18,34 @@ output "eks_cluster_tls_certificate_sha1_fingerprint" {
 ################################################################################
 # VPC
 ################################################################################
-output "vpc" {
-  description = "The vpc object when it's created"
-  value       = module.vpc
+output "vpc_id" {
+  description = "ID of the VPC created by this module (null when existing_vpc is set)"
+  value       = module.vpc.vpc_id
+}
+
+output "vpc_cidr_block" {
+  description = "CIDR block of the VPC created by this module (null when existing_vpc is set)"
+  value       = module.vpc.vpc_cidr_block
+}
+
+output "vpc_azs" {
+  description = "Availability zones requested for the module-created VPC. NOTE: this echoes vpc.azs and is populated even when existing_vpc is set."
+  value       = module.vpc.azs
+}
+
+output "private_subnet_ids" {
+  description = "IDs of the private subnets created by this module (empty when existing_vpc is set)"
+  value       = module.vpc.private_subnets
+}
+
+output "public_subnet_ids" {
+  description = "IDs of the public subnets created by this module (empty when existing_vpc is set)"
+  value       = module.vpc.public_subnets
+}
+
+output "database_subnet_group" {
+  description = "Name of the database subnet group created by this module (null when existing_vpc is set)"
+  value       = module.vpc.database_subnet_group
 }
 ################################################################################
 # EKS Cluster
@@ -42,7 +67,8 @@ output "eks_cluster_endpoint" {
 
 output "cilium_k8s_service_host" {
   description = "Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443."
-  value       = replace(module.eks.cluster_endpoint, "https://", "")
+  # try(): cluster_endpoint is null when create = false, and replace() rejects a null argument.
+  value = try(replace(module.eks.cluster_endpoint, "https://", ""), null)
 }
 
 output "eks_cluster_service_cidr" {
@@ -55,8 +81,8 @@ output "region" {
   value       = data.aws_region.current.region
 }
 
-output "vpc_endpoint_ids" {
-  description = "Map of created VPC endpoint ids (empty when vpc_endpoints is empty)."
+output "vpc_endpoints" {
+  description = "Map of created VPC endpoints, keyed by service short-name. Values are the full aws_vpc_endpoint resource objects, not bare IDs — use e.g. vpc_endpoints[\"s3\"].id. Empty when vpc_endpoints is empty or existing_vpc is set."
   value       = try(module.vpc_endpoints[0].endpoints, {})
 }
 
@@ -113,36 +139,97 @@ output "karpenter_queue_name" {
 }
 
 ################################################################################
-# IRSA Role ARNs
+# Role ARNs — Pod Identity (the default mechanism)
+#
+# Null when Pod Identity is disabled for that identity. Karpenter has no entry here: it reuses its
+# existing role for both mechanisms, so karpenter_role_arn below covers it.
 ################################################################################
 output "load_balancer_controller_role_arn" {
-  description = "ARN of the ALB controller IRSA role"
-  value       = module.load_balancer_controller_irsa_role.arn
+  description = "ARN of the ALB controller Pod Identity role"
+  value       = try(module.load_balancer_controller_pod_identity[0].iam_role_arn, null)
 }
 
 output "ebs_csi_driver_role_arn" {
-  description = "ARN of the EBS CSI driver IRSA role"
-  value       = module.ebs_csi_driver_irsa_role.arn
+  description = "ARN of the EBS CSI driver Pod Identity role"
+  value       = try(module.ebs_csi_driver_pod_identity[0].iam_role_arn, null)
 }
 
 output "s3_csi_driver_role_arn" {
-  description = "ARN of the S3 CSI driver IRSA role"
-  value       = try(module.s3_driver_irsa_role[0].arn, null)
+  description = "ARN of the S3 CSI driver Pod Identity role"
+  value       = try(module.s3_csi_driver_pod_identity[0].iam_role_arn, null)
 }
 
 output "external_dns_role_arn" {
-  description = "ARN of the External DNS IRSA role"
-  value       = try(module.external_dns_irsa_role[0].arn, null)
+  description = "ARN of the External DNS Pod Identity role"
+  value       = try(module.external_dns_pod_identity[0].iam_role_arn, null)
 }
 
 output "cert_manager_role_arn" {
-  description = "ARN of the Cert Manager IRSA role"
-  value       = try(module.cert_manager_irsa_role[0].arn, null)
+  description = "ARN of the Cert Manager Pod Identity role"
+  value       = try(module.cert_manager_pod_identity[0].iam_role_arn, null)
 }
 
 output "karpenter_role_arn" {
-  description = "ARN of the Karpenter IRSA role"
+  description = "ARN of the Karpenter controller role. One role serves both mechanisms, so this is correct whether Karpenter uses Pod Identity or IRSA."
   value       = try(module.karpenter[0].iam_role_arn, null)
+}
+
+################################################################################
+# Role ARNs — legacy IRSA
+#
+# DEPRECATED: removed in v10.0.0 once consumers have dropped their
+# eks.amazonaws.com/role-arn service account annotations. Still the live role for any identity
+# with pod_identity disabled (e.g. the GovCloud cross-partition DNS case).
+################################################################################
+output "load_balancer_controller_irsa_role_arn" {
+  description = "ARN of the ALB controller IRSA role (deprecated; removed in v10)"
+  value       = try(module.load_balancer_controller_irsa_role[0].arn, null)
+}
+
+output "ebs_csi_driver_irsa_role_arn" {
+  description = "ARN of the EBS CSI driver IRSA role (deprecated; removed in v10)"
+  value       = try(module.ebs_csi_driver_irsa_role[0].arn, null)
+}
+
+output "s3_csi_driver_irsa_role_arn" {
+  description = "ARN of the S3 CSI driver IRSA role (deprecated; removed in v10)"
+  value       = try(module.s3_driver_irsa_role[0].arn, null)
+}
+
+output "external_dns_irsa_role_arn" {
+  description = "ARN of the External DNS IRSA role (deprecated; removed in v10)"
+  value       = try(module.external_dns_irsa_role[0].arn, null)
+}
+
+output "cert_manager_irsa_role_arn" {
+  description = "ARN of the Cert Manager IRSA role (deprecated; removed in v10)"
+  value       = try(module.cert_manager_irsa_role[0].arn, null)
+}
+
+output "s3_csi_policy_attached_resolved" {
+  description = "(introspection) Whether the Mountpoint S3 policy is attached to the S3 CSI roles. False when no bucket is created and no bucket_arns are supplied, which avoids the upstream fallback that would otherwise grant s3:ListBucket on every bucket in the account."
+  value       = local.attach_s3_csi_policy
+}
+
+output "pod_identity_hosted_zone_arns_resolved" {
+  description = "(introspection) Route53 hosted zone ARNs scoped onto the cert-manager and external-dns Pod Identity roles"
+  value       = local.pod_identity_hosted_zone_arns
+}
+
+output "pod_identity_enabled_resolved" {
+  description = "(introspection) Per-identity Pod Identity enablement after resolving create, pod_identity.enabled and pod_identity.overrides"
+  value       = local.pod_identity_enabled
+}
+
+output "pod_identity_associations_resolved" {
+  description = "(introspection) Namespace/service-account pairs each enabled identity is associated with, including any cross-account target_role_arn"
+  value = {
+    for k, v in local.pod_identity_identities : k => {
+      namespace       = v.namespace
+      service_account = v.service_account
+      target_role_arn = local.pod_identity_target_role_arns[k]
+    } if local.pod_identity_enabled[k]
+  }
 }
 
 ################################################################################
@@ -168,13 +255,18 @@ output "cni_node_group_enabled" {
   value       = local.enable_cni_node_group
 }
 
+output "cni_node_size" {
+  description = "Size of the dedicated CNI node group. Wire this into the cni-bootstrap module's wait_for_nodes_count — if the two disagree the bootstrap poll hangs until wait_for_nodes_timeout and fails the apply. 0 when no CNI node group is created."
+  value       = local.enable_cni_node_group ? var.cni_node.size : 0
+}
+
 output "cni_node_taints_resolved" {
-  description = "(introspection) Taints applied to the dedicated CNI node group ({} when not created)."
+  description = "(introspection) Taints the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni_node.enabled = false) — use cni_node_group_enabled to test for the group's existence."
   value       = local.cni_node_taints
 }
 
 output "cni_node_labels_resolved" {
-  description = "(introspection) Labels applied to the dedicated CNI node group ({} when not created)."
+  description = "(introspection) Labels the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni_node.enabled = false) — use cni_node_group_enabled to test for the group's existence."
   value       = local.cni_node_labels
 }
 

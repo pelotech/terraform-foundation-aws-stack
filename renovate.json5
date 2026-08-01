@@ -6,6 +6,11 @@
   gitIgnoredAuthors: [
     '245757523+pt-release-please[bot]@users.noreply.github.com',
   ],
+  // Keeps the .pre-commit-config.yaml `rev:` pins current. Not enabled by config:best-practices,
+  // which is why pre-commit-terraform had drifted many minor versions behind.
+  'pre-commit': {
+    enabled: true,
+  },
   customManagers: [
     {
       customType: 'regex',
