@@ -195,6 +195,14 @@ the recycle destroys **only the
 and at most one coredns replica is ever disrupted so its PDB is always satisfied.
 (`cilium`/`vpc-cni` get just the one initial group.)
 
+> That guarantee holds because coredns **cannot schedule onto the CNI group** — it does not
+> tolerate the `kube-ovn.io/control-plane` taint. Since the CNI node is the newest and emptiest in
+> the cluster right after a recycle, it is exactly what the scheduler would otherwise pick. If you
+> override `addons.overrides["coredns"].configuration_values`, do not add a blanket
+> `{ operator = "Exists" }` toleration: that reintroduces the problem, and step 2 below would take
+> down DNS alongside `ovn-central`. Check the resolved value with the
+> `coredns_tolerations_resolved` output.
+
 **Breaking:** for `cni = "kube-ovn"` you must set **`cni_node.kubernetes_version`**
 (pin the CNI group's k8s version). This decouples it from `cluster_version`, so a
 control-plane bump does **not** auto-roll the master node.
@@ -561,6 +569,7 @@ Two things that will otherwise cost you an afternoon:
 | <a name="output_cni_node_labels_resolved"></a> [cni\_node\_labels\_resolved](#output\_cni\_node\_labels\_resolved) | (introspection) Labels the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
 | <a name="output_cni_node_size"></a> [cni\_node\_size](#output\_cni\_node\_size) | Size of the dedicated CNI node group. Wire this into the cni-bootstrap module's wait\_for\_nodes\_count — if the two disagree the bootstrap poll hangs until wait\_for\_nodes\_timeout and fails the apply. 0 when no CNI node group is created. |
 | <a name="output_cni_node_taints_resolved"></a> [cni\_node\_taints\_resolved](#output\_cni\_node\_taints\_resolved) | (introspection) Taints the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
+| <a name="output_coredns_tolerations_resolved"></a> [coredns\_tolerations\_resolved](#output\_coredns\_tolerations\_resolved) | (introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means the addon's stock tolerations apply (which already cover CriticalAddonsOnly). |
 | <a name="output_database_subnet_group"></a> [database\_subnet\_group](#output\_database\_subnet\_group) | Name of the database subnet group created by this module (null when existing\_vpc is set) |
 | <a name="output_ebs_csi_driver_irsa_role_arn"></a> [ebs\_csi\_driver\_irsa\_role\_arn](#output\_ebs\_csi\_driver\_irsa\_role\_arn) | ARN of the EBS CSI driver IRSA role (deprecated; removed in v10) |
 | <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver Pod Identity role |

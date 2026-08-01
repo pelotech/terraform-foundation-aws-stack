@@ -97,23 +97,31 @@ locals {
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
     }
-    "coredns" = {
+    # configuration_values.tolerations REPLACES the addon's defaults rather than appending, so it
+    # is only set when the CNI profile actually needs something beyond stock. Stock already
+    # tolerates CriticalAddonsOnly, which is why cilium and vpc-cni need nothing here.
+    "coredns" = merge({
       most_recent                 = true
       preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
-      configuration_values = jsonencode({
-        tolerations = [
-          {
-            operator = "Exists"
-          }
-        ]
-      })
-    }
+      }, length(local.coredns_tolerations) > 0 ? {
+      configuration_values = jsonencode({ tolerations = local.coredns_tolerations })
+    } : {})
     # Required for Pod Identity: the agent vends credentials to pods over a link-local address.
     # Without it, associations exist but pods get nothing.
+    #
+    # before_compute puts the agent in the upstream aws_eks_addon.before_compute resource, which
+    # skips the depends_on [node groups] carried by the regular one. Without it the agent is created
+    # LAST — after every node group — while the pod identity associations are created before them,
+    # so a node-group failure leaves associations with no agent and nothing pointing at the cause.
+    # It is a head start, not a graph edge (upstream implements it by bypassing the 30s
+    # time_sleep.this gate that node groups pass through), but it moves the agent ahead of the
+    # failure point. Safe with zero nodes: a DaemonSet addon has no desired replicas and reports
+    # ACTIVE, exactly as vpc-cni already does on this same path.
     "eks-pod-identity-agent" = {
       most_recent                 = true
+      before_compute              = true
       preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
@@ -127,6 +135,10 @@ locals {
   # same shape, a dedicated node group for the CNI's control plane — kube-ovn's
   # ovn-central, which pins to its master nodes' IPs and so must be recycled
   # (destroy/recreate) rather than rolled.
+  #
+  # `coredns_tolerations` is the counterpart to those taints: what coredns must tolerate BEYOND the
+  # addon's own defaults, which already cover CriticalAddonsOnly. Keep it minimal — a toleration
+  # coredns does not need lets it schedule somewhere the design assumes it will not.
   cni_profiles = {
     cilium = {
       system_node = {
@@ -136,7 +148,11 @@ locals {
         }
         labels = {}
       }
-      cni_node                = null
+      cni_node = null
+      # None needed. CriticalAddonsOnly is a stock coredns toleration, and cilium-operator removes
+      # node.cilium.io/agent-not-ready once the agent is ready (EKS does not re-apply it), so the
+      # taint gates coredns only until the CNI is actually usable — which is what it is for.
+      coredns_tolerations     = []
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = false # cilium kube-proxy replacement
     }
@@ -155,6 +171,17 @@ locals {
         }
         labels = { "kube-ovn/role" = "master" }
       }
+      # The nidhogg gates only. Without these coredns deadlocks behind the multus/pinger DaemonSets.
+      #
+      # Deliberately NOT kube-ovn.io/control-plane: the dedicated CNI node group is destroyed and
+      # recreated on every kube-ovn recycle, and the runbook (README "Node upgrades on kube-ovn")
+      # promises DNS survives that because coredns is not on it. Tolerating that taint would let
+      # coredns land there — it is the emptiest node right after a recycle, which is exactly what
+      # the scheduler prefers — and take DNS down alongside ovn-central.
+      coredns_tolerations = [
+        { key = "nidhogg.uswitch.com/kube-system.kube-ovn-pinger", operator = "Exists" },
+        { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", operator = "Exists" },
+      ]
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = true
     }
@@ -165,7 +192,9 @@ locals {
         }
         labels = {}
       }
-      cni_node                = null
+      cni_node = null
+      # None needed: CriticalAddonsOnly is the only taint and the coredns addon already tolerates it.
+      coredns_tolerations     = []
       enable_vpc_cni_addon    = true
       enable_kube_proxy_addon = true
     }
@@ -181,6 +210,7 @@ locals {
   enable_cni_node_group   = local.cni_profile.cni_node != null && coalesce(var.cni_node.enabled, true)
   cni_node_taints         = try(local.cni_profile.cni_node.taints, {})
   cni_node_labels         = try(local.cni_profile.cni_node.labels, {})
+  coredns_tolerations     = local.cni_profile.coredns_tolerations
   cni_node_instance_types = coalesce(var.cni_node.instance_types, var.initial_node.instance_types)
   cni_node_is_arm         = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", local.cni_node_instance_types[0]))
 

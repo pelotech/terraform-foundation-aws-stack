@@ -255,6 +255,11 @@ output "cni_node_group_enabled" {
   value       = local.enable_cni_node_group
 }
 
+output "coredns_tolerations_resolved" {
+  description = "(introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means the addon's stock tolerations apply (which already cover CriticalAddonsOnly)."
+  value       = local.coredns_tolerations
+}
+
 output "cni_node_size" {
   description = "Size of the dedicated CNI node group. Wire this into the cni-bootstrap module's wait_for_nodes_count — if the two disagree the bootstrap poll hangs until wait_for_nodes_timeout and fails the apply. 0 when no CNI node group is created."
   value       = local.enable_cni_node_group ? var.cni_node.size : 0

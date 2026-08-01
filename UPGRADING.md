@@ -235,6 +235,68 @@ and no `bucket_arns`, the upstream policy fell back to granting `s3:ListBucket` 
 - **`cni_node_taints_resolved` / `cni_node_labels_resolved`** are derived from the CNI profile
   alone and stay populated even when the node group is not created. Use `cni_node_group_enabled`.
 
+### CoreDNS tolerations are now scoped per CNI profile
+
+CoreDNS was configured with a blanket `tolerations = [{ operator = "Exists" }]`, which tolerates
+**every** taint. That was added in v8 to get CoreDNS past a single kube-ovn nidhogg gate, and has
+since silently grown to cover two taints that did not exist when it was written. It is now derived
+from the CNI profile:
+
+| `cni` | Tolerations added beyond the addon's defaults |
+| ----- | --------------------------------------------- |
+| `cilium` | none |
+| `vpc-cni` | none |
+| `kube-ovn` | `nidhogg.uswitch.com/kube-system.kube-ovn-pinger`, `nidhogg.uswitch.com/kube-system.kube-multus-ds` |
+
+Why each is safe:
+
+- **`CriticalAddonsOnly` never needed one.** The EKS CoreDNS addon ships tolerating it already, so
+  the override was redundant on every profile. (It also *replaced* the addon's defaults rather than
+  appending, which silently dropped the stock `node-role.kubernetes.io/control-plane` toleration.)
+- **cilium's `node.cilium.io/agent-not-ready:NoExecute` self-clears.** `cilium-operator` removes it
+  once the agent is ready and EKS does not re-apply it, so the taint gates CoreDNS only until the
+  CNI is usable — which is the point of it.
+- **kube-ovn keeps its nidhogg gates**, which is the deadlock the blanket was originally added for.
+
+**The fix: CoreDNS no longer tolerates `kube-ovn.io/control-plane`.** The dedicated CNI node group
+is destroyed and recreated on every kube-ovn recycle, and the ["Node upgrades on
+kube-ovn"](README.md#node-upgrades-on-kube-ovn-version-bumps--security-patches) runbook promises DNS
+survives that *because* CoreDNS is not on that node. The blanket toleration made it schedulable
+there — and right after a recycle that node is the emptiest in the cluster, exactly what the
+scheduler prefers. A replica landing there turned step 2 of the runbook into a simultaneous
+`ovn-central` and DNS outage, and could trip the CoreDNS PDB into `PodEvictionFailure`.
+
+**Action required only if** you add custom taints to the system group via
+`initial_node.taints`/`taints_extra` and were relying on the blanket toleration to keep CoreDNS
+schedulable past them. Add a matching toleration:
+
+```hcl
+addons = {
+  overrides = {
+    "coredns" = {
+      configuration_values = jsonencode({
+        tolerations = [{ key = "your-custom-taint", operator = "Exists" }]
+      })
+    }
+  }
+}
+```
+
+Note this override *replaces* the derived list, so on kube-ovn restate the two nidhogg entries
+alongside yours. The resolved value is exposed as the `coredns_tolerations_resolved` output.
+
+### The Pod Identity agent is now installed before the node groups
+
+`eks-pod-identity-agent` sets `before_compute = true`. Previously it landed in the upstream
+`aws_eks_addon.this` resource, which depends on every node group — so the agent was created **last**,
+while the Pod Identity associations were created **first**. A node group failure (bad AMI, capacity,
+`initial_node.timeouts` expiring) left every association in place with no agent to serve them, and
+nothing in the output pointing at the cause.
+
+No action required. On a successful apply the ordering was never visible; this only changes what a
+*failed* apply leaves behind. It is safe with zero nodes — a DaemonSet addon has no desired replicas
+and reports ACTIVE, exactly as `vpc-cni` already does on this path.
+
 ### New: `cni_node_size` output
 
 Wire it into the `cni-bootstrap` module's `wait_for_nodes_count`. If the two disagree the
