@@ -319,8 +319,10 @@ resource "aws_eip" "main" {
 }
 
 module "fck_nat" {
-  source             = "RaJiska/fck-nat/aws"
-  version            = "1.6.0"
+  # fork till https://github.com/RaJiska/terraform-aws-fck-nat/pull/84 is released
+  source = "git::github.com/josmo/terraform-aws-fck-nat.git?ref=v1.6.1-pre-josmo"
+  # source             = "RaJiska/fck-nat/aws"
+  # version            = "1.6.0"
   count              = var.pelotech_nat.enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
   name               = "${var.name}-${module.vpc.azs[count.index]}"
