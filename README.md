@@ -397,9 +397,8 @@ Both off is rejected at plan (it would create no roles at all); use `create = fa
 
 Running `irsa = { enabled = false }` under v9 lets you validate the v10 end state while a one-flag
 rollback is still available. Note it also tears down the cluster's IAM OIDC provider, which nulls
-`eks_oidc_provider_arn` and `eks_cluster_tls_certificate_sha1_fingerprint` and breaks any
-out-of-band role federating against it. The issuer URL (`eks_oidc_provider`) belongs to the cluster
-and survives.
+`eks_oidc_provider_arn` and breaks any out-of-band role federating against it. The issuer URL
+(`eks_oidc_provider`) belongs to the cluster and survives.
 
 Disable Pod Identity globally, or per identity:
 
@@ -472,18 +471,12 @@ pod_identity = {
 In the **commercial** account, register the GovCloud cluster's issuer and a role that trusts it:
 
 ```hcl
-# Derived here rather than from the module's eks_cluster_tls_certificate_sha1_fingerprint output,
-# so this keeps working if the GovCloud side sets irsa = { enabled = false } — that tears down the
-# gov-side OIDC provider and nulls that output. The issuer URL is a property of the cluster and is
-# always available.
-data "tls_certificate" "gov_cluster" {
-  url = "https://${module.foundation.eks_oidc_provider}"
-}
-
+# No thumbprint_list: it is optional, and when omitted IAM retrieves the issuer's CA thumbprint
+# itself. For EKS-style (S3-hosted JWKS) endpoints AWS validates against its own trusted-CA library
+# and ignores any thumbprint you do configure, so supplying one is dead weight.
 resource "aws_iam_openid_connect_provider" "gov_cluster" {
-  url             = "https://${module.foundation.eks_oidc_provider}"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.gov_cluster.certificates[0].sha1_fingerprint]
+  url            = "https://${module.foundation.eks_oidc_provider}"
+  client_id_list = ["sts.amazonaws.com"]
 }
 
 data "aws_iam_policy_document" "cert_manager_assume" {
@@ -586,7 +579,7 @@ Two things that will otherwise cost you an afternoon:
 | <a name="input_create_node_security_group"></a> [create\_node\_security\_group](#input\_create\_node\_security\_group) | Whether to create a dedicated security group for EKS managed node groups. When true, the node\_security\_group\_id output is populated. | `bool` | `false` | no |
 | <a name="input_existing_vpc"></a> [existing\_vpc](#input\_existing\_vpc) | Use an existing VPC instead of creating one (null = create the VPC from the vpc variable) | <pre>object({<br/>    vpc_id     = string<br/>    subnet_ids = list(string)<br/>  })</pre> | `null` | no |
 | <a name="input_extra_access_entries"></a> [extra\_access\_entries](#input\_extra\_access\_entries) | EKS access entries needed by IAM roles interacting with this cluster | <pre>list(object({<br/>    principal_arn     = string<br/>    kubernetes_groups = optional(list(string))<br/>    policy_associations = optional(map(object({<br/>      policy_arn = string<br/>      access_scope = object({<br/>        type       = string<br/>        namespaces = optional(list(string))<br/>      })<br/>    })), {})<br/><br/>  }))</pre> | `[]` | no |
-| <a name="input_irsa"></a> [irsa](#input\_irsa) | IRSA (IAM Roles for Service Accounts) for the workload identities this module creates.<br/><br/>Together with `pod_identity` this gives three states:<br/>  irsa on,  pod\_identity off — all IRSA (pre-v9 behavior, and the rollback target)<br/>  irsa on,  pod\_identity on  — both, the default; every identity has a role for each<br/>                               mechanism so a cutover is reversible without an IAM change<br/>  irsa off, pod\_identity on  — all Pod Identity, the v10 end state<br/><br/>Disabling also tears down the cluster's IAM OIDC provider, which nulls the<br/>eks\_oidc\_provider\_arn and eks\_cluster\_tls\_certificate\_sha1\_fingerprint outputs and breaks any<br/>out-of-band role that federates against it. The issuer URL itself (eks\_oidc\_provider) is a<br/>property of the cluster and survives.<br/><br/>Karpenter is not an exception here. It has a single role that trusts both mechanisms, so with<br/>both enabled it holds the web-identity trust AND a Pod Identity association at the same time. | <pre>object({<br/>    enabled = optional(bool, true)<br/>  })</pre> | `{}` | no |
+| <a name="input_irsa"></a> [irsa](#input\_irsa) | IRSA (IAM Roles for Service Accounts) for the workload identities this module creates.<br/><br/>Together with `pod_identity` this gives three states:<br/>  irsa on,  pod\_identity off — all IRSA (pre-v9 behavior, and the rollback target)<br/>  irsa on,  pod\_identity on  — both, the default; every identity has a role for each<br/>                               mechanism so a cutover is reversible without an IAM change<br/>  irsa off, pod\_identity on  — all Pod Identity, the v10 end state<br/><br/>Disabling also tears down the cluster's IAM OIDC provider, which nulls the<br/>eks\_oidc\_provider\_arn output and breaks any out-of-band role that federates against it. The<br/>issuer URL itself (eks\_oidc\_provider) is a property of the cluster and survives.<br/><br/>Karpenter is not an exception here. It has a single role that trusts both mechanisms, so with<br/>both enabled it holds the web-identity trust AND a Pod Identity association at the same time. | <pre>object({<br/>    enabled = optional(bool, true)<br/>  })</pre> | `{}` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_node_iam_additional_policies"></a> [node\_iam\_additional\_policies](#input\_node\_iam\_additional\_policies) | Map of IAM policy name to ARN to attach to the managed node group IAM role. | `map(string)` | `{}` | no |
 | <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami\_owner\_id/ami\_name\_filter at your own image. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. auto\_rollout (default false): when enabled, a newer AMI matching ami\_name\_filter found at apply time triggers a rolling instance refresh on the NAT ASG (brief per-AZ NAT outage while the instance is replaced); leave false to recycle instances manually. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "aws-marketplace")<br/>    ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    auto_rollout    = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
@@ -621,7 +614,6 @@ Two things that will otherwise cost you an afternoon:
 | <a name="output_eks_cluster_iam_role_name"></a> [eks\_cluster\_iam\_role\_name](#output\_eks\_cluster\_iam\_role\_name) | The name of the EKS cluster IAM role |
 | <a name="output_eks_cluster_name"></a> [eks\_cluster\_name](#output\_eks\_cluster\_name) | The name of the EKS cluster |
 | <a name="output_eks_cluster_service_cidr"></a> [eks\_cluster\_service\_cidr](#output\_eks\_cluster\_service\_cidr) | The cluster's Kubernetes service CIDR (AWS-assigned or configured). Wire into the cni-bootstrap module's service\_cidr for kube-ovn (ipv4.SVC\_CIDR). |
-| <a name="output_eks_cluster_tls_certificate_sha1_fingerprint"></a> [eks\_cluster\_tls\_certificate\_sha1\_fingerprint](#output\_eks\_cluster\_tls\_certificate\_sha1\_fingerprint) | The SHA1 fingerprint of the public key of the cluster's certificate. Null when irsa.enabled is false: upstream gates the TLS data source on the OIDC provider. Derive it yourself with a tls\_certificate data source against https://<eks\_oidc\_provider> if you need it then (e.g. to build a cross-partition OIDC provider in another account). |
 | <a name="output_eks_managed_node_groups"></a> [eks\_managed\_node\_groups](#output\_eks\_managed\_node\_groups) | Map of attribute maps for all EKS managed node groups created |
 | <a name="output_eks_managed_node_groups_autoscaling_group_names"></a> [eks\_managed\_node\_groups\_autoscaling\_group\_names](#output\_eks\_managed\_node\_groups\_autoscaling\_group\_names) | List of the autoscaling group names created by EKS managed node groups |
 | <a name="output_eks_oidc_provider"></a> [eks\_oidc\_provider](#output\_eks\_oidc\_provider) | The OpenID Connect identity provider (issuer URL without leading `https://`). A property of the cluster itself, so this is populated regardless of irsa.enabled. |

@@ -105,9 +105,8 @@ variable "irsa" {
       irsa off, pod_identity on  — all Pod Identity, the v10 end state
 
     Disabling also tears down the cluster's IAM OIDC provider, which nulls the
-    eks_oidc_provider_arn and eks_cluster_tls_certificate_sha1_fingerprint outputs and breaks any
-    out-of-band role that federates against it. The issuer URL itself (eks_oidc_provider) is a
-    property of the cluster and survives.
+    eks_oidc_provider_arn output and breaks any out-of-band role that federates against it. The
+    issuer URL itself (eks_oidc_provider) is a property of the cluster and survives.
 
     Karpenter is not an exception here. It has a single role that trusts both mechanisms, so with
     both enabled it holds the web-identity trust AND a Pod Identity association at the same time.

@@ -11,11 +11,6 @@ output "eks_oidc_provider" {
   value       = module.eks.oidc_provider
 }
 
-output "eks_cluster_tls_certificate_sha1_fingerprint" {
-  description = "The SHA1 fingerprint of the public key of the cluster's certificate. Null when irsa.enabled is false: upstream gates the TLS data source on the OIDC provider. Derive it yourself with a tls_certificate data source against https://<eks_oidc_provider> if you need it then (e.g. to build a cross-partition OIDC provider in another account)."
-  value       = module.eks.cluster_tls_certificate_sha1_fingerprint
-}
-
 output "irsa_enabled_resolved" {
   description = "(introspection) Whether the legacy IRSA roles and the cluster OIDC provider are created, after resolving create and irsa.enabled"
   value       = local.irsa_enabled

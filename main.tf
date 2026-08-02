@@ -495,8 +495,7 @@ module "eks" {
   subnet_ids                    = var.existing_vpc != null ? var.existing_vpc.subnet_ids : module.vpc.private_subnets
   addons                        = local.cluster_addons
   create_kms_key                = var.create_cluster_kms
-  # Also gates the cluster's IAM OIDC provider and the TLS data source behind it, so disabling
-  # nulls eks_oidc_provider_arn and eks_cluster_tls_certificate_sha1_fingerprint.
+  # Also gates the cluster's IAM OIDC provider, so disabling nulls eks_oidc_provider_arn.
   enable_irsa = var.irsa.enabled
   encryption_config = var.create_cluster_kms ? {
     "resources" : [

@@ -34,37 +34,19 @@ module "foundation" {
 This is not a temporary workaround. IAM cannot assume a role across partitions, so Pod Identity's
 cross-account path (`target_role_arn`) can never reach a commercial account from `aws-us-gov`.
 IRSA can, because it is OIDC web-identity federation: the commercial account registers an
-`aws_iam_openid_connect_provider` against your GovCloud cluster's issuer URL. Everything the
-commercial side needs is already exported — `eks_oidc_provider` (issuer URL without `https://`)
-and `eks_cluster_tls_certificate_sha1_fingerprint`. Nothing in the GovCloud account is required
-beyond leaving these two identities on IRSA.
+`aws_iam_openid_connect_provider` against your GovCloud cluster's issuer URL. The only thing the
+commercial side needs from here is `eks_oidc_provider` (the issuer URL without `https://`) — no
+thumbprint, see below. Nothing in the GovCloud account is required beyond leaving these two
+identities on IRSA.
 
 Every *other* identity (ALB controller, EBS CSI, S3 CSI, Karpenter) uses Pod Identity normally in
 GovCloud — the opt-out is per-identity, not cluster-wide.
 
 Once you are fully migrated you can also set `irsa = { enabled = false }`: the gov-side IRSA roles
 for these two are dead weight, because the role they actually assume lives in the commercial
-account. Two things to know before you do:
-
-- **`eks_cluster_tls_certificate_sha1_fingerprint` becomes null**, because disabling IRSA tears
-  down the cluster's IAM OIDC provider and upstream gates the TLS data source on it. The commercial
-  account still needs a thumbprint for its `aws_iam_openid_connect_provider`, so derive it there
-  instead — `eks_oidc_provider` keeps working because the issuer belongs to the cluster:
-
-  ```hcl
-  data "tls_certificate" "gov_cluster" {
-    url = "https://${module.foundation.eks_oidc_provider}"
-  }
-
-  resource "aws_iam_openid_connect_provider" "gov_cluster" {
-    url             = "https://${module.foundation.eks_oidc_provider}"
-    client_id_list  = ["sts.amazonaws.com"]
-    thumbprint_list = [data.tls_certificate.gov_cluster.certificates[0].sha1_fingerprint]
-  }
-  ```
-
-- **The cross-partition flow is unaffected.** It federates against the gov cluster's *issuer* and a
-  provider object in the *commercial* account; the gov-side provider plays no part in it.
+account. The cross-partition flow is unaffected — it federates against the gov cluster's *issuer*
+and a provider object in the *commercial* account, so the gov-side provider plays no part in it,
+and `eks_oidc_provider` keeps working because the issuer belongs to the cluster.
 
 ### Role ARNs change
 
@@ -110,6 +92,36 @@ a service account annotation, it now resolves to the Pod Identity role — and r
 identity you disabled. GovCloud consumers keeping cert-manager and external-dns on IRSA must switch
 those references to `*_irsa_role_arn`.
 
+### `eks_cluster_tls_certificate_sha1_fingerprint` removed
+
+Its only purpose was supplying `thumbprint_list` to an `aws_iam_openid_connect_provider`, and that
+argument is optional. When it is omitted, IAM retrieves the issuer's top intermediate CA thumbprint
+itself. For EKS-style endpoints (Amazon S3-hosted JWKS) AWS goes further and validates against its
+own trusted-CA library, *ignoring* any thumbprint you configure — so the value was being computed,
+exported, and then discarded.
+
+Drop the argument:
+
+```hcl
+resource "aws_iam_openid_connect_provider" "cluster" {
+  url            = "https://${module.foundation.eks_oidc_provider}"
+  client_id_list = ["sts.amazonaws.com"]
+}
+```
+
+If you have a genuine need for one — a non-EKS IdP behind a private CA, say — derive it yourself:
+
+```hcl
+data "tls_certificate" "cluster" {
+  url = "https://${module.foundation.eks_oidc_provider}"
+}
+# thumbprint_list = [data.tls_certificate.cluster.certificates[0].sha1_fingerprint]
+```
+
+Removing `thumbprint_list` from an **existing** provider is cosmetic: the AWS provider does not
+send an update for an emptied list, so the previously-registered thumbprint simply stays. That is
+harmless, since it is not used for verification.
+
 ### Choosing a mechanism: `irsa` and `pod_identity`
 
 The two toggles are independent, which gives three usable states:
@@ -128,9 +140,8 @@ Running the end state early is the point of the `irsa` toggle: you can validate
 at the v10 major where the roles are gone for good.
 
 Note what disabling IRSA also removes: the cluster's **IAM OIDC provider**. That nulls
-`eks_oidc_provider_arn` and `eks_cluster_tls_certificate_sha1_fingerprint`, and breaks any
-out-of-band role that federates against it. The issuer URL (`eks_oidc_provider`) is a property of
-the cluster and survives — see the GovCloud section above.
+`eks_oidc_provider_arn` and breaks any out-of-band role that federates against it. The issuer URL
+(`eks_oidc_provider`) is a property of the cluster and survives — see the GovCloud section above.
 
 ### What happens on first apply against an existing cluster
 
