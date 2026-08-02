@@ -301,19 +301,20 @@ variable "extra_access_entries" {
 
   validation {
     error_message = "The access scope type can only be 'namespace' or 'cluster'"
+    # coalesce rather than a `== null ||` guard — see the note on cni_node.instance_types below.
     condition = alltrue([
-      for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
-        for policy in values(entry.policy_associations) : contains(["namespace", "cluster"], policy.access_scope.type)
-      ]))
+      for entry in var.extra_access_entries : alltrue([
+        for policy in values(coalesce(entry.policy_associations, {})) : contains(["namespace", "cluster"], policy.access_scope.type)
+      ])
     ])
   }
 
   validation {
     error_message = "The access scope type 'namespace' requires 'namespaces', namespaces can't be set otherwise."
     condition = alltrue([
-      for entry in var.extra_access_entries : ((entry.policy_associations == null) || alltrue([
-        for policy in values(entry.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) || policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
-      ]))
+      for entry in var.extra_access_entries : alltrue([
+        for policy in values(coalesce(entry.policy_associations, {})) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) || policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
+      ])
     ])
   }
 }
@@ -352,7 +353,10 @@ variable "cni_node" {
     error_message = "cni_node.kubernetes_version must be set when cni = \"kube-ovn\" so a control-plane version bump does not auto-roll the CNI master node (kube-ovn deadlock). Set it to the current node k8s version, then bump it deliberately during a recycle."
   }
   validation {
-    condition     = var.cni_node.instance_types == null || length(distinct([for t in var.cni_node.instance_types : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
+    # coalesce rather than a `== null ||` guard: Terraform 1.9 (the required_version floor) does
+    # not short-circuit ||, so it still evaluates the for expression and fails with "Iteration over
+    # null value" whenever instance_types is unset — which is the default.
+    condition     = length(distinct([for t in coalesce(var.cni_node.instance_types, []) : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
     error_message = "All cni_node.instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
   }
   validation {
