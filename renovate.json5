@@ -13,6 +13,7 @@
   },
   customManagers: [
     {
+      // Helm chart versions in the cni-bootstrap defaults.
       customType: 'regex',
       managerFilePatterns: [
         '/^modules/cni-bootstrap/main\\.tf$/',
@@ -21,6 +22,20 @@
         '#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+registryUrl=(?<registryUrl>\\S+))?[^\\n]*\\n\\s*version\\s*=\\s*"(?<currentValue>[^"]+)"',
       ],
       versioningTemplate: 'semver',
+    },
+    {
+      // CI tool versions that the built-in github-actions manager cannot see: `with:` inputs
+      // (setup-trivy's version, setup-tflint's tflint_version) and `env:` vars interpolated into
+      // download URLs (hcledit, terraform-docs). Only annotated lines are matched, so
+      // terraform_version stays pinned to the required_version floor by hand.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/.*\\.ya?ml$/',
+      ],
+      matchStrings: [
+        '#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?[^\\n]*\\n\\s*[\\w-]+:\\s*["\']?(?<currentValue>[^"\'\\s]+)["\']?',
+      ],
+      versioningTemplate: '{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}',
     },
   ],
   packageRules: [

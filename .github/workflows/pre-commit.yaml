@@ -21,43 +21,58 @@ jobs:
       - name: install pre-commit
         run: pip install pre-commit
 
+      # NOTE: deliberately NOT Renovate-annotated. This is pinned to the required_version floor in
+      # versions.tf so CI proves that constraint is honest; auto-bumping it would silently stop
+      # testing the floor. Raise it by hand when versions.tf changes.
       - name: Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.9.0"
 
       - name: install hcledit
+        env:
+          # renovate: datasource=github-releases depName=minamijoyo/hcledit
+          HCLEDIT_VERSION: 0.2.10
         run: |
+          set -euo pipefail
           tmpdir=$(mktemp -d)
-          curl -sSLo "$tmpdir/hcledit.tar.gz" https://github.com/minamijoyo/hcledit/releases/download/v0.2.10/hcledit_0.2.10_linux_amd64.tar.gz
+          curl -sSLo "$tmpdir/hcledit.tar.gz" "https://github.com/minamijoyo/hcledit/releases/download/v${HCLEDIT_VERSION}/hcledit_${HCLEDIT_VERSION}_linux_amd64.tar.gz"
           tar -xzf "$tmpdir/hcledit.tar.gz" -C "$tmpdir"
           chmod +x "$tmpdir/hcledit"
           sudo mv "$tmpdir/hcledit" /usr/local/bin/hcledit
 
-      # Pinned rather than piping install_linux.sh from master into bash: this job later mints a
-      # write-capable app token, so an unpinned script from a moving branch is a supply-chain hole.
+      # The official action rather than piping install_linux.sh into bash: this job later mints a
+      # write-capable app token. Note that pinning the *script* URL to a tag would not have helped
+      # — install_linux.sh resolves the tool version at runtime from the GitHub API unless
+      # TFLINT_VERSION is set, so a versioned script URL pins the script and not the binary.
       - name: install tf-lint
+        uses: terraform-linters/setup-tflint@6e1e0642c0289bd619021bf6b34e3c08ed1e005a # v6.3.0
+        with:
+          # renovate: datasource=github-releases depName=terraform-linters/tflint
+          tflint_version: v0.59.1
+          # Caches the plugin dir keyed on .tflint.hcl; the terraform ruleset is otherwise
+          # re-downloaded on every run.
+          cache: true
+
+      - name: install tf-docs
         env:
-          TFLINT_VERSION: v0.59.1
+          # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
+          TERRAFORM_DOCS_VERSION: v0.22.0
         run: |
           set -euo pipefail
           tmpdir=$(mktemp -d)
-          curl -sSLo "$tmpdir/tflint.zip" "https://github.com/terraform-linters/tflint/releases/download/${TFLINT_VERSION}/tflint_linux_amd64.zip"
-          unzip -q "$tmpdir/tflint.zip" -d "$tmpdir"
-          chmod +x "$tmpdir/tflint"
-          sudo mv "$tmpdir/tflint" /usr/local/bin/tflint
-
-      - name: install tf-docs
-        run: |
-          tmpdir=$(mktemp -d)
-          curl -sSLo "$tmpdir/terraform-docs.tar.gz" https://terraform-docs.io/dl/v0.22.0/terraform-docs-v0.22.0-linux-amd64.tar.gz
+          curl -sSLo "$tmpdir/terraform-docs.tar.gz" "https://terraform-docs.io/dl/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz"
           tar -xzf "$tmpdir/terraform-docs.tar.gz" -C "$tmpdir"
           chmod +x "$tmpdir/terraform-docs"
           sudo mv "$tmpdir/terraform-docs" /usr/local/bin/terraform-docs
 
+      # The version input is not a `uses:` ref, so Renovate's github-actions manager cannot see it.
+      # Without the annotation below the pinned binary — and with --skip-check-update, its embedded
+      # check database — never advances.
       - name: install trivy
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
+          # renovate: datasource=github-releases depName=aquasecurity/trivy
           version: v0.72.0
 
       - name: Regenerate docs
