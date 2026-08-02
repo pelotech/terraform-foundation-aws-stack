@@ -310,6 +310,88 @@ run "create_false_disables_pod_identity" {
   }
 }
 
+################################################################################
+# irsa / pod_identity matrix
+#
+# The two toggles are independent, giving all-IRSA, both (the default transition state), and
+# all-Pod-Identity. Karpenter is NOT an exception: its single role trusts both mechanisms, so in
+# "both" mode it carries the web-identity trust and an association at the same time.
+################################################################################
+
+run "both_mechanisms_by_default" {
+  command = plan
+
+  assert {
+    condition     = output.irsa_enabled_resolved == true && alltrue(values(output.pod_identity_enabled_resolved))
+    error_message = "the default must create both mechanisms so a cutover is reversible"
+  }
+}
+
+run "all_irsa" {
+  command = plan
+
+  variables {
+    pod_identity = { enabled = false }
+  }
+
+  assert {
+    condition     = output.irsa_enabled_resolved == true
+    error_message = "irsa must stay on when only pod identity is disabled"
+  }
+  assert {
+    condition     = length(output.pod_identity_associations_resolved) == 0
+    error_message = "no associations may exist in all-IRSA mode"
+  }
+  assert {
+    condition     = output.cluster_addons_enabled_resolved["eks-pod-identity-agent"] == false
+    error_message = "the agent addon must be off in all-IRSA mode"
+  }
+}
+
+run "all_pod_identity" {
+  command = plan
+
+  variables {
+    irsa = { enabled = false }
+  }
+
+  assert {
+    condition     = output.irsa_enabled_resolved == false
+    error_message = "irsa.enabled = false must disable the legacy roles"
+  }
+  assert {
+    condition = (
+      output.load_balancer_controller_irsa_role_arn == null &&
+      output.ebs_csi_driver_irsa_role_arn == null &&
+      output.s3_csi_driver_irsa_role_arn == null &&
+      output.external_dns_irsa_role_arn == null &&
+      output.cert_manager_irsa_role_arn == null
+    )
+    error_message = "no IRSA roles may be created in all-Pod-Identity mode"
+  }
+  # Tearing down the OIDC provider is part of disabling IRSA; the issuer URL survives because it
+  # is a property of the cluster, which is what a cross-partition setup actually federates against.
+  assert {
+    condition     = output.eks_oidc_provider_arn == null
+    error_message = "the cluster OIDC provider must be torn down when IRSA is disabled"
+  }
+  assert {
+    condition     = alltrue(values(output.pod_identity_enabled_resolved))
+    error_message = "every identity must still use Pod Identity"
+  }
+}
+
+run "both_mechanisms_disabled_rejected" {
+  command = plan
+
+  variables {
+    irsa         = { enabled = false }
+    pod_identity = { enabled = false }
+  }
+
+  expect_failures = [var.irsa]
+}
+
 run "unknown_override_key_rejected" {
   command = plan
 

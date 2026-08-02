@@ -55,6 +55,10 @@ locals {
     karpenter                = { namespace = "karpenter", service_account = "karpenter" }
   }
 
+  # IRSA is all-or-nothing, unlike Pod Identity: it is the mechanism being retired, so the only
+  # meaningful choices are "still on during the transition" and "gone". See var.irsa.
+  irsa_enabled = var.create && var.irsa.enabled
+
   # Per-identity override wins; otherwise the global toggle. Disabling an identity creates no Pod
   # Identity role and no association, leaving its IRSA role to keep serving the workload.
   pod_identity_enabled = {
@@ -491,7 +495,9 @@ module "eks" {
   subnet_ids                    = var.existing_vpc != null ? var.existing_vpc.subnet_ids : module.vpc.private_subnets
   addons                        = local.cluster_addons
   create_kms_key                = var.create_cluster_kms
-  enable_irsa                   = true
+  # Also gates the cluster's IAM OIDC provider and the TLS data source behind it, so disabling
+  # nulls eks_oidc_provider_arn and eks_cluster_tls_certificate_sha1_fingerprint.
+  enable_irsa = var.irsa.enabled
   encryption_config = var.create_cluster_kms ? {
     "resources" : [
       "secrets"
@@ -541,9 +547,10 @@ module "eks" {
 # `pods.eks.amazonaws.com` trust statement, so its existing role already works with Pod Identity.
 # This doc bolts web-identity on top and is dropped once the association takes over.
 data "aws_iam_policy_document" "source" { # allow usage with irsa
-  # Gated on var.create: module.eks.oidc_provider is null when the cluster is not created, and
-  # interpolating it into the condition variables below fails at plan time.
-  count = var.create ? 1 : 0
+  # Gated on local.irsa_enabled, which folds in var.create: module.eks.oidc_provider is null when
+  # the cluster is not created, and oidc_provider_arn is null when the OIDC provider is not
+  # created — either way interpolating them here fails at plan time.
+  count = local.irsa_enabled ? 1 : 0
 
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -578,17 +585,21 @@ module "karpenter" {
   # MUST be set explicitly: the submodule defaults to namespace "kube-system", but this stack runs
   # Karpenter in the "karpenter" namespace (see the web-identity :sub condition above). Taking the
   # default would associate a service account that does not exist and silently strand Karpenter.
-  namespace                               = local.pod_identity_identities["karpenter"].namespace
-  service_account                         = local.pod_identity_identities["karpenter"].service_account
-  iam_role_permissions_boundary_arn       = local.permissions_boundary_arn
-  node_iam_role_permissions_boundary      = local.permissions_boundary_arn
-  iam_role_source_assume_policy_documents = local.pod_identity_enabled["karpenter"] ? [] : data.aws_iam_policy_document.source[*].json
+  namespace                          = local.pod_identity_identities["karpenter"].namespace
+  service_account                    = local.pod_identity_identities["karpenter"].service_account
+  iam_role_permissions_boundary_arn  = local.permissions_boundary_arn
+  node_iam_role_permissions_boundary = local.permissions_boundary_arn
+  # Keyed off IRSA, not Pod Identity, so the two are independent. The upstream submodule always
+  # emits a pods.eks.amazonaws.com trust statement, so with both mechanisms on this role holds the
+  # web-identity trust AND the association at once — Karpenter gets the same dual-mode window as
+  # the identities that have two separate roles.
+  iam_role_source_assume_policy_documents = local.irsa_enabled ? data.aws_iam_policy_document.source[*].json : []
   tags                                    = var.tags
 }
 
 # IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
-  count   = var.create ? 1 : 0
+  count   = local.irsa_enabled ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -609,7 +620,7 @@ module "load_balancer_controller_irsa_role" {
 }
 
 module "ebs_csi_driver_irsa_role" {
-  count   = var.create ? 1 : 0
+  count   = local.irsa_enabled ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -652,7 +663,7 @@ module "s3_csi" {
 }
 
 module "s3_driver_irsa_role" {
-  count   = var.create ? 1 : 0
+  count   = local.irsa_enabled ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -674,7 +685,7 @@ module "s3_driver_irsa_role" {
 }
 
 module "external_dns_irsa_role" {
-  count   = var.create ? 1 : 0
+  count   = local.irsa_enabled ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -697,7 +708,7 @@ module "external_dns_irsa_role" {
 
 
 module "cert_manager_irsa_role" {
-  count   = var.create ? 1 : 0
+  count   = local.irsa_enabled ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 

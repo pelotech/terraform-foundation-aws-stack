@@ -42,6 +42,30 @@ beyond leaving these two identities on IRSA.
 Every *other* identity (ALB controller, EBS CSI, S3 CSI, Karpenter) uses Pod Identity normally in
 GovCloud — the opt-out is per-identity, not cluster-wide.
 
+Once you are fully migrated you can also set `irsa = { enabled = false }`: the gov-side IRSA roles
+for these two are dead weight, because the role they actually assume lives in the commercial
+account. Two things to know before you do:
+
+- **`eks_cluster_tls_certificate_sha1_fingerprint` becomes null**, because disabling IRSA tears
+  down the cluster's IAM OIDC provider and upstream gates the TLS data source on it. The commercial
+  account still needs a thumbprint for its `aws_iam_openid_connect_provider`, so derive it there
+  instead — `eks_oidc_provider` keeps working because the issuer belongs to the cluster:
+
+  ```hcl
+  data "tls_certificate" "gov_cluster" {
+    url = "https://${module.foundation.eks_oidc_provider}"
+  }
+
+  resource "aws_iam_openid_connect_provider" "gov_cluster" {
+    url             = "https://${module.foundation.eks_oidc_provider}"
+    client_id_list  = ["sts.amazonaws.com"]
+    thumbprint_list = [data.tls_certificate.gov_cluster.certificates[0].sha1_fingerprint]
+  }
+  ```
+
+- **The cross-partition flow is unaffected.** It federates against the gov cluster's *issuer* and a
+  provider object in the *commercial* account; the gov-side provider plays no part in it.
+
 ### Role ARNs change
 
 The five migrated identities get **new roles with new ARNs**. Nothing inside this module
@@ -57,8 +81,9 @@ KMS key policies, S3 bucket policies, or a cross-account trust policy in a DNS a
 | cert-manager | `${name}-cert-manager-role` | `${name}-cert-manager-pod-identity-role` |
 | Karpenter | `${name}-karpenter-role` | *(unchanged — reuses the same role)* |
 
-Karpenter is the exception: its role already trusted `pods.eks.amazonaws.com`, so it keeps its ARN
-and only gains an association. `karpenter_role_arn` covers both mechanisms.
+Karpenter is the one identity without a parallel role: its role already trusted
+`pods.eks.amazonaws.com`, so it keeps its ARN and only gains an association.
+`karpenter_role_arn` covers both mechanisms and does not change.
 
 ### Output renames
 
@@ -85,37 +110,46 @@ a service account annotation, it now resolves to the Pod Identity role — and r
 identity you disabled. GovCloud consumers keeping cert-manager and external-dns on IRSA must switch
 those references to `*_irsa_role_arn`.
 
+### Choosing a mechanism: `irsa` and `pod_identity`
+
+The two toggles are independent, which gives three usable states:
+
+| `irsa.enabled` | `pod_identity.enabled` | State |
+| -------------- | ---------------------- | ----- |
+| `true` | `false` | All IRSA — v8 behavior, and the rollback target |
+| `true` | `true` | **Both — the v9 default.** Every identity has a role for each mechanism |
+| `false` | `true` | All Pod Identity — the v10 end state, reachable now |
+
+Both `false` is rejected at plan; it would create no workload identity roles at all. Use
+`create = false` if you want nothing.
+
+Running the end state early is the point of the `irsa` toggle: you can validate
+`irsa = { enabled = false }` under v9 and roll back with one flag, instead of discovering problems
+at the v10 major where the roles are gone for good.
+
+Note what disabling IRSA also removes: the cluster's **IAM OIDC provider**. That nulls
+`eks_oidc_provider_arn` and `eks_cluster_tls_certificate_sha1_fingerprint`, and breaks any
+out-of-band role that federates against it. The issuer URL (`eks_oidc_provider`) is a property of
+the cluster and survives — see the GovCloud section above.
+
 ### What happens on first apply against an existing cluster
 
-For the five parallel identities the plan is **create-only** — no existing IAM role is modified or
-destroyed. Karpenter is the exception:
+The plan is **create-only**. No existing IAM role is modified or destroyed, Karpenter included:
 
 - **+1 addon** — `eks-pod-identity-agent` (a DaemonSet; enabled automatically whenever any identity
   uses Pod Identity, forceable with `addons.pod_identity_agent`)
 - **+5 IAM roles and policies** — the Pod Identity roles above
 - **+6 pod identity associations** — five from the new roles, one from the Karpenter submodule
-- **~1 IAM role trust policy modified** — Karpenter's (see below)
-- **0 changes** to the five IRSA roles
+- **0 changes** to the five IRSA roles, and none to Karpenter's
 
 Pods pick up the new credentials at their next restart, not at apply time.
 
-#### Karpenter is the exception — read before applying
-
-Karpenter has no parallel role. Enabling Pod Identity **modifies its existing role's trust policy
-in place**, dropping the `sts:AssumeRoleWithWebIdentity` statement in the same apply that creates
-the association and installs the agent addon. It is the one identity with no dual-mode window: for
-the interval between the trust policy changing and the agent DaemonSet becoming ready, Karpenter
-has neither mechanism and cannot provision nodes.
-
-This is normally seconds and self-heals, but if you cannot tolerate that window, stage it:
-
-```hcl
-# Apply 1 — install the agent, leave Karpenter on IRSA.
-pod_identity = { overrides = { karpenter = { enabled = false } } }
-
-# Apply 2 — once the eks-pod-identity-agent DaemonSet is Ready on every node.
-pod_identity = {}
-```
+Karpenter has a single role rather than a parallel one, but that role trusts **both** mechanisms
+simultaneously: the upstream submodule always emits a `pods.eks.amazonaws.com` trust statement, and
+the web-identity statement is now keyed off `irsa.enabled` rather than off Pod Identity. So with
+the default (both enabled) it holds the web-identity trust *and* an association at once, and gets
+the same dual-mode window as everything else. Its trust policy is only rewritten when you actually
+turn IRSA off.
 
 ### Rollback
 
@@ -123,9 +157,8 @@ pod_identity = {}
 pod_identity = { enabled = false }
 ```
 
-Apply, then restart the affected pods. For the five parallel identities this is complete and needs
-no IAM change, because their IRSA roles were never touched. For Karpenter the rollback *does*
-rewrite its trust policy — back to web-identity — so it is one apply, not zero.
+Apply, then restart the affected pods. This is complete and needs no IAM change — the IRSA roles
+were never touched, and Karpenter keeps its web-identity trust throughout.
 
 ### After migrating
 

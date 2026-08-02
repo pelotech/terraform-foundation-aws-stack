@@ -94,6 +94,36 @@ variable "addons" {
   nullable = false
 }
 
+variable "irsa" {
+  description = <<-EOT
+    IRSA (IAM Roles for Service Accounts) for the workload identities this module creates.
+
+    Together with `pod_identity` this gives three states:
+      irsa on,  pod_identity off — all IRSA (pre-v9 behavior, and the rollback target)
+      irsa on,  pod_identity on  — both, the default; every identity has a role for each
+                                   mechanism so a cutover is reversible without an IAM change
+      irsa off, pod_identity on  — all Pod Identity, the v10 end state
+
+    Disabling also tears down the cluster's IAM OIDC provider, which nulls the
+    eks_oidc_provider_arn and eks_cluster_tls_certificate_sha1_fingerprint outputs and breaks any
+    out-of-band role that federates against it. The issuer URL itself (eks_oidc_provider) is a
+    property of the cluster and survives.
+
+    Karpenter is not an exception here. It has a single role that trusts both mechanisms, so with
+    both enabled it holds the web-identity trust AND a Pod Identity association at the same time.
+  EOT
+  type = object({
+    enabled = optional(bool, true)
+  })
+  default  = {}
+  nullable = false
+
+  validation {
+    condition     = var.irsa.enabled || var.pod_identity.enabled
+    error_message = "irsa.enabled and pod_identity.enabled cannot both be false: no workload identity roles would be created for any identity. Enable at least one mechanism, or set create = false to provision nothing."
+  }
+}
+
 variable "pod_identity" {
   description = <<-EOT
     EKS Pod Identity for the workload identities this module creates (load_balancer_controller,
