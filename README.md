@@ -363,9 +363,9 @@ themselves — it emits role ARNs and the GitOps layer wires them up.
 | `karpenter` | `karpenter` | `karpenter` |
 
 Since v9, each identity gets an **EKS Pod Identity** role and association by default, plus the
-`eks-pod-identity-agent` addon. No `eks.amazonaws.com/role-arn` annotation is needed. The legacy
-IRSA roles still exist alongside them (they are removed in v10) — see
-[UPGRADING.md](UPGRADING.md) for the migration.
+`eks-pod-identity-agent` addon. No `eks.amazonaws.com/role-arn` annotation is needed. The IRSA roles
+are created alongside them and remain fully supported — Pod Identity cannot serve Fargate, so IRSA
+is not going away. See [UPGRADING.md](UPGRADING.md) for the migration.
 
 The agent is installed automatically — there is no manual step. It is enabled whenever at least one
 identity uses Pod Identity (including the partial-opt-out case below, where the remaining
@@ -380,44 +380,67 @@ node group failure cannot leave associations behind with nothing to serve them.
 
 ### Choosing a mechanism
 
-`irsa` and `pod_identity` toggle independently:
-
-```hcl
-irsa         = { enabled = true }   # default
-pod_identity = { enabled = true }   # default
-```
+`irsa` and `pod_identity` toggle independently, and both default to `enabled = true`:
 
 | `irsa` | `pod_identity` | State |
 | ------ | -------------- | ----- |
 | on | off | All IRSA — pre-v9 behavior, and the rollback target |
 | on | on | **Both — the default.** Each identity has a role for each mechanism |
-| off | on | All Pod Identity — the v10 end state, reachable now |
+| off | on | All Pod Identity — the v10 default, reachable now with a one-flag rollback |
+| off | off | No role from this module — for identities you manage out of band |
 
-Both off is rejected at plan (it would create no roles at all); use `create = false` for that.
-
-Running `irsa = { enabled = false }` under v9 lets you validate the v10 end state while a one-flag
-rollback is still available. Note it also tears down the cluster's IAM OIDC provider, which nulls
-`eks_oidc_provider_arn` and breaks any out-of-band role federating against it. The issuer URL
-(`eks_oidc_provider`) belongs to the cluster and survives.
-
-Disable Pod Identity globally, or per identity:
+Both also resolve **per identity**: the override wins, otherwise the variable's `enabled`. So the
+table describes the fallback each identity takes, not a cluster-wide mode.
 
 ```hcl
 pod_identity = {
   enabled = true                                    # default
   overrides = {
-    cert_manager = { enabled = false }              # this identity stays on IRSA
+    cert_manager = { enabled = false }              # this identity is left to `irsa`
+  }
+}
+
+irsa = {
+  enabled = false                                   # everything moves to Pod Identity...
+  overrides = {
+    external_dns = { enabled = true }               # ...except this one
   }
 }
 ```
+
+That second shape is why per-identity `irsa` overrides exist: the agent is a DaemonSet and does not
+run on Fargate, so a controller scheduled there has to stay on IRSA. Without overrides, keeping one
+controller on IRSA means keeping all six.
+
+Leaving an identity on neither mechanism is allowed, but this module then creates no role for it and
+nothing warns you at plan time. Karpenter is a partial exception: its role is created whenever
+`create` is true, so turning both mechanisms off only drops the web-identity trust statement and the
+association — the role itself stays.
 
 > **Pod Identity wins over an IRSA service account annotation.** If a workload must keep using its
 > annotation, you have to disable Pod Identity for that identity — removing the association is the
 > only thing that yields precedence back.
 
-Each identity exposes two outputs: `<identity>_role_arn` for the Pod Identity role (null when
-disabled) and `<identity>_irsa_role_arn` for the legacy IRSA role. The IRSA outputs are removed in
-v10. `karpenter_role_arn` is a single output for both mechanisms — Karpenter reuses one role.
+#### The cluster OIDC provider
+
+The IAM OIDC provider is created whenever **any** identity still resolves to IRSA, so it disappears
+on its own once the last one moves — nulling `eks_oidc_provider_arn` and breaking any out-of-band
+role federating against it. Keep it explicitly if you have such roles:
+
+```hcl
+irsa = {
+  enabled              = false
+  create_oidc_provider = true   # keep the provider for out-of-band IRSA roles
+}
+```
+
+Forcing it `false` while an identity still uses IRSA is rejected at plan — those roles federate
+against the provider you would be suppressing. The issuer URL (`eks_oidc_provider`) belongs to the
+cluster and is populated either way.
+
+Each identity exposes two outputs: `<identity>_role_arn` for the Pod Identity role and
+`<identity>_irsa_role_arn` for the IRSA role. Both are null when that identity is not on the
+mechanism. `karpenter_role_arn` is a single output for both — Karpenter reuses one role.
 
 ### Scoping Route53 access
 
@@ -579,13 +602,13 @@ Two things that will otherwise cost you an afternoon:
 | <a name="input_create_node_security_group"></a> [create\_node\_security\_group](#input\_create\_node\_security\_group) | Whether to create a dedicated security group for EKS managed node groups. When true, the node\_security\_group\_id output is populated. | `bool` | `false` | no |
 | <a name="input_existing_vpc"></a> [existing\_vpc](#input\_existing\_vpc) | Use an existing VPC instead of creating one (null = create the VPC from the vpc variable) | <pre>object({<br/>    vpc_id     = string<br/>    subnet_ids = list(string)<br/>  })</pre> | `null` | no |
 | <a name="input_extra_access_entries"></a> [extra\_access\_entries](#input\_extra\_access\_entries) | EKS access entries needed by IAM roles interacting with this cluster | <pre>list(object({<br/>    principal_arn     = string<br/>    kubernetes_groups = optional(list(string))<br/>    policy_associations = optional(map(object({<br/>      policy_arn = string<br/>      access_scope = object({<br/>        type       = string<br/>        namespaces = optional(list(string))<br/>      })<br/>    })), {})<br/><br/>  }))</pre> | `[]` | no |
-| <a name="input_irsa"></a> [irsa](#input\_irsa) | IRSA (IAM Roles for Service Accounts) for the workload identities this module creates.<br/><br/>Together with `pod_identity` this gives three states:<br/>  irsa on,  pod\_identity off — all IRSA (pre-v9 behavior, and the rollback target)<br/>  irsa on,  pod\_identity on  — both, the default; every identity has a role for each<br/>                               mechanism so a cutover is reversible without an IAM change<br/>  irsa off, pod\_identity on  — all Pod Identity, the v10 end state<br/><br/>Disabling also tears down the cluster's IAM OIDC provider, which nulls the<br/>eks\_oidc\_provider\_arn output and breaks any out-of-band role that federates against it. The<br/>issuer URL itself (eks\_oidc\_provider) is a property of the cluster and survives.<br/><br/>Karpenter is not an exception here. It has a single role that trusts both mechanisms, so with<br/>both enabled it holds the web-identity trust AND a Pod Identity association at the same time. | <pre>object({<br/>    enabled = optional(bool, true)<br/>  })</pre> | `{}` | no |
+| <a name="input_irsa"></a> [irsa](#input\_irsa) | IRSA (IAM Roles for Service Accounts) for the workload identities this module creates<br/>(load\_balancer\_controller, ebs\_csi\_driver, s3\_csi\_driver, external\_dns, cert\_manager, karpenter).<br/><br/>Resolves per identity exactly like `pod_identity`: the override wins, otherwise `enabled`. The<br/>two mechanisms are independent, so each identity is on IRSA, on Pod Identity, on both (the<br/>default, which makes a cutover reversible without an IAM change), or on neither.<br/><br/>Mixing matters because the eks-pod-identity-agent is a DaemonSet and does not run on Fargate: a<br/>controller scheduled onto Fargate has to stay on IRSA while the rest of the cluster moves, so<br/>`enabled = false` with an override re-enabling that one identity is the expected shape.<br/><br/>Leaving an identity on neither mechanism is allowed — use it when you manage that role out of<br/>band — but this module then creates no role for it, and nothing warns you at plan time.<br/><br/>enabled              — v10.0.0 flips this default to false, making IRSA opt-in. The roles and<br/>                       the *\_irsa\_role\_arn outputs are permanent; only the default changes.<br/>create\_oidc\_provider — null (default) creates the cluster's IAM OIDC provider whenever any<br/>                       identity resolves to IRSA. Set true to keep it after the last identity<br/>                       has moved, for out-of-band roles that federate against it. The issuer URL<br/>                       (eks\_oidc\_provider) belongs to the cluster and survives either way.<br/><br/>Karpenter has one role trusting both mechanisms rather than a role per mechanism, so it behaves<br/>differently at the edges — see README, "Choosing a mechanism". | <pre>object({<br/>    enabled              = optional(bool, true)<br/>    create_oidc_provider = optional(bool)<br/>    overrides = optional(map(object({<br/>      enabled = optional(bool)<br/>    })), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name of the stack | `string` | `"foundation-stack"` | no |
 | <a name="input_node_iam_additional_policies"></a> [node\_iam\_additional\_policies](#input\_node\_iam\_additional\_policies) | Map of IAM policy name to ARN to attach to the managed node group IAM role. | `map(string)` | `{}` | no |
 | <a name="input_pelotech_nat"></a> [pelotech\_nat](#input\_pelotech\_nat) | Pelotech NAT instances replacing the managed NAT gateway — a hardened fck-nat-based image (FIPS, L2 compliance, optional Tailscale) from AWS Marketplace. IMPORTANT: the default AMI is the Pelotech NAT image from AWS Marketplace and requires an active Marketplace subscription in the target account — without one the instance launch fails at apply time with OptInRequired. Subscribe first, or point ami\_owner\_id/ami\_name\_filter at your own image. create\_eip creates the NAT EIP even when enabled=false — nice for getting ips created for allow lists. auto\_rollout (default false): when enabled, a newer AMI matching ami\_name\_filter found at apply time triggers a rolling instance refresh on the NAT ASG (brief per-AZ NAT outage while the instance is replaced); leave false to recycle instances manually. tailscale: provide auth via tailscale.auth\_key\_ssm (name of an existing SSM parameter) or pelotech\_nat\_tailscale\_auth\_key (plain key; the module stores it in a SecureString SSM parameter it creates). The instances always read the key from SSM. SecureString params under the default aws/ssm KMS key work as-is; customer-managed KMS keys on an existing parameter require a key-policy grant outside this module. | <pre>object({<br/>    enabled         = optional(bool, false)<br/>    instance_type   = optional(string, "t4g.micro")<br/>    ami_owner_id    = optional(string, "aws-marketplace")<br/>    ami_name_filter = optional(string, "pelotech-nat-al2023-hvm-*")<br/>    create_eip      = optional(bool, false)<br/>    auto_rollout    = optional(bool, false)<br/>    tailscale = optional(object({<br/>      enabled            = optional(bool, false)<br/>      auth_key_ssm       = optional(string, "")<br/>      advertise_routes   = optional(string, "")<br/>      exit_node          = optional(bool, false)<br/>      hostname           = optional(string, "")<br/>      snat_subnet_routes = optional(bool, true)<br/>      extra_args         = optional(string, "")<br/>    }), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_pelotech_nat_tailscale_auth_key"></a> [pelotech\_nat\_tailscale\_auth\_key](#input\_pelotech\_nat\_tailscale\_auth\_key) | Plain Tailscale auth key for NAT instances. Stored by the module in a SecureString SSM parameter (never written to user-data; the value does land in terraform state - prefer pelotech\_nat.tailscale.auth\_key\_ssm with a pre-existing parameter). | `string` | `""` | no |
 | <a name="input_permissions_boundary"></a> [permissions\_boundary](#input\_permissions\_boundary) | IAM permissions boundary policy name applied to all IAM roles. When set, constructs full ARN from the current account and partition. | `string` | `""` | no |
-| <a name="input_pod_identity"></a> [pod\_identity](#input\_pod\_identity) | EKS Pod Identity for the workload identities this module creates (load\_balancer\_controller,<br/>ebs\_csi\_driver, s3\_csi\_driver, external\_dns, cert\_manager, karpenter).<br/><br/>When enabled, each identity gets its own Pod Identity role plus an association, and the<br/>`eks-pod-identity-agent` addon is installed. The legacy IRSA roles are left untouched and keep<br/>their own ARNs, so disabling an identity is a no-op on existing state.<br/><br/>NOTE: Pod Identity takes precedence over an `eks.amazonaws.com/role-arn` service account<br/>annotation. Disable an identity here to keep IRSA serving it.<br/><br/>overrides (keyed by identity name):<br/>  enabled              — false leaves the identity on IRSA (required in GovCloud for<br/>                         cert\_manager/external\_dns when the hosted zones live in a commercial<br/>                         account, since IAM cannot assume a role across partitions).<br/>  target\_role\_arn      — cross-account role chaining. The target role holds the permissions,<br/>                         so the predefined policy is replaced by an sts:AssumeRole grant.<br/>                         Same-partition only; not supported for karpenter.<br/>  disable\_session\_tags — passed through to the association. Not supported for karpenter.<br/>  hosted\_zone\_arns     — Route53 scoping for cert\_manager/external\_dns only. Null (default)<br/>                         keeps the historic unscoped grant. Applies to the Pod Identity role<br/>                         only: an identity left on IRSA keeps its own unscoped grant, because<br/>                         the IRSA roles are deliberately never modified. | <pre>object({<br/>    enabled = optional(bool, true)<br/>    overrides = optional(map(object({<br/>      enabled              = optional(bool)<br/>      target_role_arn      = optional(string)<br/>      disable_session_tags = optional(bool)<br/>      hosted_zone_arns     = optional(list(string))<br/>    })), {})<br/>  })</pre> | `{}` | no |
+| <a name="input_pod_identity"></a> [pod\_identity](#input\_pod\_identity) | EKS Pod Identity for the workload identities this module creates (load\_balancer\_controller,<br/>ebs\_csi\_driver, s3\_csi\_driver, external\_dns, cert\_manager, karpenter).<br/><br/>When enabled, each identity gets its own Pod Identity role plus an association, and the<br/>`eks-pod-identity-agent` addon is installed. The IRSA roles are left untouched and keep their<br/>own ARNs, so disabling an identity is a no-op on existing state.<br/><br/>NOTE: Pod Identity takes precedence over an `eks.amazonaws.com/role-arn` service account<br/>annotation. Disable an identity here to keep IRSA serving it.<br/><br/>overrides (keyed by identity name):<br/>  enabled              — false leaves the identity to `irsa`, which may itself be off for it<br/>                         (required in GovCloud for cert\_manager/external\_dns when the hosted<br/>                         zones live in a commercial account, since IAM cannot assume a role<br/>                         across partitions).<br/>  target\_role\_arn      — cross-account role chaining. The target role holds the permissions,<br/>                         so the predefined policy is replaced by an sts:AssumeRole grant.<br/>                         Same-partition only; not supported for karpenter.<br/>  disable\_session\_tags — passed through to the association. Not supported for karpenter.<br/>  hosted\_zone\_arns     — Route53 scoping for cert\_manager/external\_dns only. Null (default)<br/>                         keeps the historic unscoped grant. Applies to the Pod Identity role<br/>                         only: an identity left on IRSA keeps its own unscoped grant, because<br/>                         the IRSA roles are deliberately never modified. | <pre>object({<br/>    enabled = optional(bool, true)<br/>    overrides = optional(map(object({<br/>      enabled              = optional(bool)<br/>      target_role_arn      = optional(string)<br/>      disable_session_tags = optional(bool)<br/>      hosted_zone_arns     = optional(list(string))<br/>    })), {})<br/>  })</pre> | `{}` | no |
 | <a name="input_pre_bootstrap_user_data"></a> [pre\_bootstrap\_user\_data](#input\_pre\_bootstrap\_user\_data) | Custom user data script to run before node bootstrap. Useful for installing CA certificates or custom packages. | `string` | `null` | no |
 | <a name="input_s3_csi"></a> [s3\_csi](#input\_s3\_csi) | S3 CSI driver bucket access. create\_bucket: create a new bucket for use with the driver. bucket\_name: override the generated bucket name (default "<tags.Owner>-<name>-csi-bucket"); required if tags has no Owner key. bucket\_arns: existing buckets the driver should have access to. When create\_bucket is false and bucket\_arns is empty, no S3 policy is attached to the driver roles at all. | <pre>object({<br/>    create_bucket = optional(bool, true)<br/>    bucket_name   = optional(string)<br/>    bucket_arns   = optional(list(string), [])<br/>  })</pre> | `{}` | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | tags to be added to the stack, should at least have Owner and Environment | `map(string)` | <pre>{<br/>  "Environment": "prod",<br/>  "Owner": "pelotech"<br/>}</pre> | no |
@@ -596,7 +619,7 @@ Two things that will otherwise cost you an afternoon:
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_cert_manager_irsa_role_arn"></a> [cert\_manager\_irsa\_role\_arn](#output\_cert\_manager\_irsa\_role\_arn) | ARN of the Cert Manager IRSA role (deprecated; removed in v10) |
+| <a name="output_cert_manager_irsa_role_arn"></a> [cert\_manager\_irsa\_role\_arn](#output\_cert\_manager\_irsa\_role\_arn) | ARN of the Cert Manager IRSA role. Null when cert\_manager is not on IRSA. |
 | <a name="output_cert_manager_role_arn"></a> [cert\_manager\_role\_arn](#output\_cert\_manager\_role\_arn) | ARN of the Cert Manager Pod Identity role |
 | <a name="output_cilium_k8s_service_host"></a> [cilium\_k8s\_service\_host](#output\_cilium\_k8s\_service\_host) | Kubernetes API server host (no https:// scheme) for Cilium kubeProxyReplacement=true. Set helm k8sServiceHost to this and k8sServicePort to 443. |
 | <a name="output_cluster_addons_enabled_resolved"></a> [cluster\_addons\_enabled\_resolved](#output\_cluster\_addons\_enabled\_resolved) | (introspection) Managed addon enablement after resolving cni and the addons.* overrides |
@@ -607,7 +630,7 @@ Two things that will otherwise cost you an afternoon:
 | <a name="output_cni_node_taints_resolved"></a> [cni\_node\_taints\_resolved](#output\_cni\_node\_taints\_resolved) | (introspection) Taints the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
 | <a name="output_coredns_tolerations_resolved"></a> [coredns\_tolerations\_resolved](#output\_coredns\_tolerations\_resolved) | (introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means the addon's stock tolerations apply (which already cover CriticalAddonsOnly). |
 | <a name="output_database_subnet_group"></a> [database\_subnet\_group](#output\_database\_subnet\_group) | Name of the database subnet group created by this module (null when existing\_vpc is set) |
-| <a name="output_ebs_csi_driver_irsa_role_arn"></a> [ebs\_csi\_driver\_irsa\_role\_arn](#output\_ebs\_csi\_driver\_irsa\_role\_arn) | ARN of the EBS CSI driver IRSA role (deprecated; removed in v10) |
+| <a name="output_ebs_csi_driver_irsa_role_arn"></a> [ebs\_csi\_driver\_irsa\_role\_arn](#output\_ebs\_csi\_driver\_irsa\_role\_arn) | ARN of the EBS CSI driver IRSA role. Null when ebs\_csi\_driver is not on IRSA. |
 | <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver Pod Identity role |
 | <a name="output_eks_cluster_certificate_authority_data"></a> [eks\_cluster\_certificate\_authority\_data](#output\_eks\_cluster\_certificate\_authority\_data) | Base64 encoded certificate data for the cluster |
 | <a name="output_eks_cluster_endpoint"></a> [eks\_cluster\_endpoint](#output\_eks\_cluster\_endpoint) | The endpoint for the EKS cluster API server |
@@ -616,18 +639,19 @@ Two things that will otherwise cost you an afternoon:
 | <a name="output_eks_cluster_service_cidr"></a> [eks\_cluster\_service\_cidr](#output\_eks\_cluster\_service\_cidr) | The cluster's Kubernetes service CIDR (AWS-assigned or configured). Wire into the cni-bootstrap module's service\_cidr for kube-ovn (ipv4.SVC\_CIDR). |
 | <a name="output_eks_managed_node_groups"></a> [eks\_managed\_node\_groups](#output\_eks\_managed\_node\_groups) | Map of attribute maps for all EKS managed node groups created |
 | <a name="output_eks_managed_node_groups_autoscaling_group_names"></a> [eks\_managed\_node\_groups\_autoscaling\_group\_names](#output\_eks\_managed\_node\_groups\_autoscaling\_group\_names) | List of the autoscaling group names created by EKS managed node groups |
-| <a name="output_eks_oidc_provider"></a> [eks\_oidc\_provider](#output\_eks\_oidc\_provider) | The OpenID Connect identity provider (issuer URL without leading `https://`). A property of the cluster itself, so this is populated regardless of irsa.enabled. |
-| <a name="output_eks_oidc_provider_arn"></a> [eks\_oidc\_provider\_arn](#output\_eks\_oidc\_provider\_arn) | EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band. Null when irsa.enabled is false — the provider is not created. |
-| <a name="output_external_dns_irsa_role_arn"></a> [external\_dns\_irsa\_role\_arn](#output\_external\_dns\_irsa\_role\_arn) | ARN of the External DNS IRSA role (deprecated; removed in v10) |
+| <a name="output_eks_oidc_provider"></a> [eks\_oidc\_provider](#output\_eks\_oidc\_provider) | The OpenID Connect identity provider (issuer URL without leading `https://`). A property of the cluster itself, so this is populated whether or not the OIDC provider exists. |
+| <a name="output_eks_oidc_provider_arn"></a> [eks\_oidc\_provider\_arn](#output\_eks\_oidc\_provider\_arn) | EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band. Null when no identity uses IRSA and irsa.create\_oidc\_provider is not forced true — the provider is not created. |
+| <a name="output_external_dns_irsa_role_arn"></a> [external\_dns\_irsa\_role\_arn](#output\_external\_dns\_irsa\_role\_arn) | ARN of the External DNS IRSA role. Null when external\_dns is not on IRSA. |
 | <a name="output_external_dns_role_arn"></a> [external\_dns\_role\_arn](#output\_external\_dns\_role\_arn) | ARN of the External DNS Pod Identity role |
 | <a name="output_initial_node_labels_resolved"></a> [initial\_node\_labels\_resolved](#output\_initial\_node\_labels\_resolved) | (introspection) Labels applied to the initial managed node group after resolving cni and initial\_node.labels(\_extra) |
 | <a name="output_initial_node_taints_resolved"></a> [initial\_node\_taints\_resolved](#output\_initial\_node\_taints\_resolved) | (introspection) Taints applied to the initial managed node group after resolving cni and initial\_node.taints(\_extra) |
-| <a name="output_irsa_enabled_resolved"></a> [irsa\_enabled\_resolved](#output\_irsa\_enabled\_resolved) | (introspection) Whether the legacy IRSA roles and the cluster OIDC provider are created, after resolving create and irsa.enabled |
+| <a name="output_irsa_enabled_resolved"></a> [irsa\_enabled\_resolved](#output\_irsa\_enabled\_resolved) | (introspection) Per-identity IRSA enablement after resolving create, irsa.enabled and irsa.overrides |
+| <a name="output_irsa_oidc_provider_enabled_resolved"></a> [irsa\_oidc\_provider\_enabled\_resolved](#output\_irsa\_oidc\_provider\_enabled\_resolved) | (introspection) Whether the cluster's IAM OIDC provider is created, after resolving create, irsa.create\_oidc\_provider and per-identity IRSA usage |
 | <a name="output_karpenter_node_iam_role_name"></a> [karpenter\_node\_iam\_role\_name](#output\_karpenter\_node\_iam\_role\_name) | The name of the Karpenter node IAM role |
 | <a name="output_karpenter_queue_name"></a> [karpenter\_queue\_name](#output\_karpenter\_queue\_name) | The name of the Karpenter SQS queue |
 | <a name="output_karpenter_role_arn"></a> [karpenter\_role\_arn](#output\_karpenter\_role\_arn) | ARN of the Karpenter controller role. One role serves both mechanisms, so this is correct whether Karpenter uses Pod Identity or IRSA. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | The Amazon Resource Name (ARN) of the KMS key |
-| <a name="output_load_balancer_controller_irsa_role_arn"></a> [load\_balancer\_controller\_irsa\_role\_arn](#output\_load\_balancer\_controller\_irsa\_role\_arn) | ARN of the ALB controller IRSA role (deprecated; removed in v10) |
+| <a name="output_load_balancer_controller_irsa_role_arn"></a> [load\_balancer\_controller\_irsa\_role\_arn](#output\_load\_balancer\_controller\_irsa\_role\_arn) | ARN of the ALB controller IRSA role. Null when load\_balancer\_controller is not on IRSA. |
 | <a name="output_load_balancer_controller_role_arn"></a> [load\_balancer\_controller\_role\_arn](#output\_load\_balancer\_controller\_role\_arn) | ARN of the ALB controller Pod Identity role |
 | <a name="output_nat_tailscale_conf_resolved"></a> [nat\_tailscale\_conf\_resolved](#output\_nat\_tailscale\_conf\_resolved) | (introspection) Rendered tailscale fck-nat.conf lines per AZ ({} when tailscale is disabled). Only references the SSM parameter name, never the key value. |
 | <a name="output_node_security_group_id"></a> [node\_security\_group\_id](#output\_node\_security\_group\_id) | ID of the node shared security group |
@@ -637,7 +661,7 @@ Two things that will otherwise cost you an afternoon:
 | <a name="output_private_subnet_ids"></a> [private\_subnet\_ids](#output\_private\_subnet\_ids) | IDs of the private subnets created by this module (empty when existing\_vpc is set) |
 | <a name="output_public_subnet_ids"></a> [public\_subnet\_ids](#output\_public\_subnet\_ids) | IDs of the public subnets created by this module (empty when existing\_vpc is set) |
 | <a name="output_region"></a> [region](#output\_region) | The AWS region the stack is deployed in. Wire into the cni-bootstrap module's region so its node-registration poll can region-qualify the cluster. |
-| <a name="output_s3_csi_driver_irsa_role_arn"></a> [s3\_csi\_driver\_irsa\_role\_arn](#output\_s3\_csi\_driver\_irsa\_role\_arn) | ARN of the S3 CSI driver IRSA role (deprecated; removed in v10) |
+| <a name="output_s3_csi_driver_irsa_role_arn"></a> [s3\_csi\_driver\_irsa\_role\_arn](#output\_s3\_csi\_driver\_irsa\_role\_arn) | ARN of the S3 CSI driver IRSA role. Null when s3\_csi\_driver is not on IRSA. |
 | <a name="output_s3_csi_driver_role_arn"></a> [s3\_csi\_driver\_role\_arn](#output\_s3\_csi\_driver\_role\_arn) | ARN of the S3 CSI driver Pod Identity role |
 | <a name="output_s3_csi_policy_attached_resolved"></a> [s3\_csi\_policy\_attached\_resolved](#output\_s3\_csi\_policy\_attached\_resolved) | (introspection) Whether the Mountpoint S3 policy is attached to the S3 CSI roles. False when no bucket is created and no bucket\_arns are supplied, which avoids the upstream fallback that would otherwise grant s3:ListBucket on every bucket in the account. |
 | <a name="output_vpc_azs"></a> [vpc\_azs](#output\_vpc\_azs) | Availability zones requested for the module-created VPC. NOTE: this echoes vpc.azs and is populated even when existing\_vpc is set. |

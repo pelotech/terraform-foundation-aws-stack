@@ -2,18 +2,23 @@
 # IRSA
 ################################################################################
 output "eks_oidc_provider_arn" {
-  description = "EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band. Null when irsa.enabled is false — the provider is not created."
+  description = "EKS OIDC provider ARN to be able to add IRSA roles to the cluster out of band. Null when no identity uses IRSA and irsa.create_oidc_provider is not forced true — the provider is not created."
   value       = module.eks.oidc_provider_arn
 }
 
 output "eks_oidc_provider" {
-  description = "The OpenID Connect identity provider (issuer URL without leading `https://`). A property of the cluster itself, so this is populated regardless of irsa.enabled."
+  description = "The OpenID Connect identity provider (issuer URL without leading `https://`). A property of the cluster itself, so this is populated whether or not the OIDC provider exists."
   value       = module.eks.oidc_provider
 }
 
 output "irsa_enabled_resolved" {
-  description = "(introspection) Whether the legacy IRSA roles and the cluster OIDC provider are created, after resolving create and irsa.enabled"
+  description = "(introspection) Per-identity IRSA enablement after resolving create, irsa.enabled and irsa.overrides"
   value       = local.irsa_enabled
+}
+
+output "irsa_oidc_provider_enabled_resolved" {
+  description = "(introspection) Whether the cluster's IAM OIDC provider is created, after resolving create, irsa.create_oidc_provider and per-identity IRSA usage"
+  value       = local.irsa_oidc_provider_enabled
 }
 ################################################################################
 # VPC
@@ -175,34 +180,34 @@ output "karpenter_role_arn" {
 }
 
 ################################################################################
-# Role ARNs — legacy IRSA
+# Role ARNs — IRSA
 #
-# DEPRECATED: removed in v10.0.0 once consumers have dropped their
-# eks.amazonaws.com/role-arn service account annotations. Still the live role for any identity
-# with pod_identity disabled (e.g. the GovCloud cross-partition DNS case).
+# Not deprecated. Pod Identity cannot serve Fargate (its agent is a DaemonSet), so IRSA stays a
+# supported mechanism and these roles are permanent. v10.0.0 flips the irsa.enabled default to
+# false, making IRSA opt-in; nothing here is removed.
 ################################################################################
 output "load_balancer_controller_irsa_role_arn" {
-  description = "ARN of the ALB controller IRSA role (deprecated; removed in v10)"
+  description = "ARN of the ALB controller IRSA role. Null when load_balancer_controller is not on IRSA."
   value       = try(module.load_balancer_controller_irsa_role[0].arn, null)
 }
 
 output "ebs_csi_driver_irsa_role_arn" {
-  description = "ARN of the EBS CSI driver IRSA role (deprecated; removed in v10)"
+  description = "ARN of the EBS CSI driver IRSA role. Null when ebs_csi_driver is not on IRSA."
   value       = try(module.ebs_csi_driver_irsa_role[0].arn, null)
 }
 
 output "s3_csi_driver_irsa_role_arn" {
-  description = "ARN of the S3 CSI driver IRSA role (deprecated; removed in v10)"
+  description = "ARN of the S3 CSI driver IRSA role. Null when s3_csi_driver is not on IRSA."
   value       = try(module.s3_driver_irsa_role[0].arn, null)
 }
 
 output "external_dns_irsa_role_arn" {
-  description = "ARN of the External DNS IRSA role (deprecated; removed in v10)"
+  description = "ARN of the External DNS IRSA role. Null when external_dns is not on IRSA."
   value       = try(module.external_dns_irsa_role[0].arn, null)
 }
 
 output "cert_manager_irsa_role_arn" {
-  description = "ARN of the Cert Manager IRSA role (deprecated; removed in v10)"
+  description = "ARN of the Cert Manager IRSA role. Null when cert_manager is not on IRSA."
   value       = try(module.cert_manager_irsa_role[0].arn, null)
 }
 
@@ -224,7 +229,7 @@ output "pod_identity_enabled_resolved" {
 output "pod_identity_associations_resolved" {
   description = "(introspection) Namespace/service-account pairs each enabled identity is associated with, including any cross-account target_role_arn"
   value = {
-    for k, v in local.pod_identity_identities : k => {
+    for k, v in local.workload_identities : k => {
       namespace       = v.namespace
       service_account = v.service_account
       target_role_arn = local.pod_identity_target_role_arns[k]

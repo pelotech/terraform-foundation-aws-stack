@@ -42,11 +42,12 @@ locals {
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 
-  # Workload identities served by this module. These namespace/service-account pairs are the
-  # contract with the consumer's GitOps layer: they are deliberately NOT the upstream chart
-  # defaults (kube-system:ebs-csi-driver, not ebs-csi-controller-sa; alb, not kube-system), and
-  # they must match what the legacy IRSA roles already trust or an association silently misses.
-  pod_identity_identities = {
+  # Workload identities served by this module, and the key set both mechanisms resolve over. These
+  # namespace/service-account pairs are the contract with the consumer's GitOps layer: they are
+  # deliberately NOT the upstream chart defaults (kube-system:ebs-csi-driver, not
+  # ebs-csi-controller-sa; alb, not kube-system), and they must match what the legacy IRSA roles
+  # already trust or an association silently misses.
+  workload_identities = {
     load_balancer_controller = { namespace = "alb", service_account = "aws-load-balancer-controller" }
     ebs_csi_driver           = { namespace = "kube-system", service_account = "ebs-csi-driver" }
     s3_csi_driver            = { namespace = "kube-system", service_account = "s3-csi-driver" }
@@ -55,19 +56,33 @@ locals {
     karpenter                = { namespace = "karpenter", service_account = "karpenter" }
   }
 
-  # IRSA is all-or-nothing, unlike Pod Identity: it is the mechanism being retired, so the only
-  # meaningful choices are "still on during the transition" and "gone". See var.irsa.
-  irsa_enabled = var.create && var.irsa.enabled
+  # The two mechanisms resolve identically and independently: per-identity override wins, otherwise
+  # the global toggle, and var.create gates both.
 
-  # Per-identity override wins; otherwise the global toggle. Disabling an identity creates no Pod
-  # Identity role and no association, leaving its IRSA role to keep serving the workload.
+  # An identity can therefore stay on IRSA while the rest of the cluster is on Pod Identity — needed
+  # for anything scheduled on Fargate, where the agent DaemonSet cannot run.
+  irsa_enabled = {
+    for k in keys(local.workload_identities) : k =>
+    var.create && coalesce(try(var.irsa.overrides[k].enabled, null), var.irsa.enabled)
+  }
+
+  # Disabling an identity here creates no Pod Identity role and no association, leaving whatever
+  # irsa_enabled resolves to for it to keep serving the workload.
   pod_identity_enabled = {
-    for k, v in local.pod_identity_identities : k =>
+    for k in keys(local.workload_identities) : k =>
     var.create && coalesce(try(var.pod_identity.overrides[k].enabled, null), var.pod_identity.enabled)
   }
 
+  # The provider follows usage rather than a flag, because every IRSA role interpolates its ARN.
+  # Forcing it true keeps it alive for out-of-band roles once the last identity has moved off IRSA;
+  # forcing it false while an identity still uses IRSA is rejected by var.irsa's validation.
+  irsa_oidc_provider_enabled = var.create && coalesce(
+    var.irsa.create_oidc_provider,
+    anytrue(values(local.irsa_enabled)),
+  )
+
   pod_identity_target_role_arns = {
-    for k, v in local.pod_identity_identities : k =>
+    for k in keys(local.workload_identities) : k =>
     local.pod_identity_enabled[k] ? try(var.pod_identity.overrides[k].target_role_arn, null) : null
   }
 
@@ -496,7 +511,7 @@ module "eks" {
   addons                        = local.cluster_addons
   create_kms_key                = var.create_cluster_kms
   # Also gates the cluster's IAM OIDC provider, so disabling nulls eks_oidc_provider_arn.
-  enable_irsa = var.irsa.enabled
+  enable_irsa = local.irsa_oidc_provider_enabled
   encryption_config = var.create_cluster_kms ? {
     "resources" : [
       "secrets"
@@ -549,7 +564,7 @@ data "aws_iam_policy_document" "source" { # allow usage with irsa
   # Gated on local.irsa_enabled, which folds in var.create: module.eks.oidc_provider is null when
   # the cluster is not created, and oidc_provider_arn is null when the OIDC provider is not
   # created — either way interpolating them here fails at plan time.
-  count = local.irsa_enabled ? 1 : 0
+  count = local.irsa_enabled["karpenter"] ? 1 : 0
 
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -584,21 +599,22 @@ module "karpenter" {
   # MUST be set explicitly: the submodule defaults to namespace "kube-system", but this stack runs
   # Karpenter in the "karpenter" namespace (see the web-identity :sub condition above). Taking the
   # default would associate a service account that does not exist and silently strand Karpenter.
-  namespace                          = local.pod_identity_identities["karpenter"].namespace
-  service_account                    = local.pod_identity_identities["karpenter"].service_account
+  namespace                          = local.workload_identities["karpenter"].namespace
+  service_account                    = local.workload_identities["karpenter"].service_account
   iam_role_permissions_boundary_arn  = local.permissions_boundary_arn
   node_iam_role_permissions_boundary = local.permissions_boundary_arn
   # Keyed off IRSA, not Pod Identity, so the two are independent. The upstream submodule always
   # emits a pods.eks.amazonaws.com trust statement, so with both mechanisms on this role holds the
   # web-identity trust AND the association at once — Karpenter gets the same dual-mode window as
-  # the identities that have two separate roles.
-  iam_role_source_assume_policy_documents = local.irsa_enabled ? data.aws_iam_policy_document.source[*].json : []
+  # the identities that have two separate roles. That same always-on statement is why turning both
+  # mechanisms off for karpenter still leaves the role: only this document and the association go.
+  iam_role_source_assume_policy_documents = local.irsa_enabled["karpenter"] ? data.aws_iam_policy_document.source[*].json : []
   tags                                    = var.tags
 }
 
 # IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
-  count   = local.irsa_enabled ? 1 : 0
+  count   = local.irsa_enabled["load_balancer_controller"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -619,7 +635,7 @@ module "load_balancer_controller_irsa_role" {
 }
 
 module "ebs_csi_driver_irsa_role" {
-  count   = local.irsa_enabled ? 1 : 0
+  count   = local.irsa_enabled["ebs_csi_driver"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -662,7 +678,7 @@ module "s3_csi" {
 }
 
 module "s3_driver_irsa_role" {
-  count   = local.irsa_enabled ? 1 : 0
+  count   = local.irsa_enabled["s3_csi_driver"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -684,7 +700,7 @@ module "s3_driver_irsa_role" {
 }
 
 module "external_dns_irsa_role" {
-  count   = local.irsa_enabled ? 1 : 0
+  count   = local.irsa_enabled["external_dns"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -707,7 +723,7 @@ module "external_dns_irsa_role" {
 
 
 module "cert_manager_irsa_role" {
-  count   = local.irsa_enabled ? 1 : 0
+  count   = local.irsa_enabled["cert_manager"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.8.0"
 
@@ -775,8 +791,8 @@ module "load_balancer_controller_pod_identity" {
   associations = {
     cluster = {
       cluster_name         = module.eks.cluster_name
-      namespace            = local.pod_identity_identities["load_balancer_controller"].namespace
-      service_account      = local.pod_identity_identities["load_balancer_controller"].service_account
+      namespace            = local.workload_identities["load_balancer_controller"].namespace
+      service_account      = local.workload_identities["load_balancer_controller"].service_account
       target_role_arn      = local.pod_identity_target_role_arns["load_balancer_controller"]
       disable_session_tags = try(var.pod_identity.overrides["load_balancer_controller"].disable_session_tags, null)
     }
@@ -802,8 +818,8 @@ module "ebs_csi_driver_pod_identity" {
   associations = {
     cluster = {
       cluster_name         = module.eks.cluster_name
-      namespace            = local.pod_identity_identities["ebs_csi_driver"].namespace
-      service_account      = local.pod_identity_identities["ebs_csi_driver"].service_account
+      namespace            = local.workload_identities["ebs_csi_driver"].namespace
+      service_account      = local.workload_identities["ebs_csi_driver"].service_account
       target_role_arn      = local.pod_identity_target_role_arns["ebs_csi_driver"]
       disable_session_tags = try(var.pod_identity.overrides["ebs_csi_driver"].disable_session_tags, null)
     }
@@ -832,8 +848,8 @@ module "s3_csi_driver_pod_identity" {
   associations = {
     cluster = {
       cluster_name         = module.eks.cluster_name
-      namespace            = local.pod_identity_identities["s3_csi_driver"].namespace
-      service_account      = local.pod_identity_identities["s3_csi_driver"].service_account
+      namespace            = local.workload_identities["s3_csi_driver"].namespace
+      service_account      = local.workload_identities["s3_csi_driver"].service_account
       target_role_arn      = local.pod_identity_target_role_arns["s3_csi_driver"]
       disable_session_tags = try(var.pod_identity.overrides["s3_csi_driver"].disable_session_tags, null)
     }
@@ -861,8 +877,8 @@ module "external_dns_pod_identity" {
   associations = {
     cluster = {
       cluster_name         = module.eks.cluster_name
-      namespace            = local.pod_identity_identities["external_dns"].namespace
-      service_account      = local.pod_identity_identities["external_dns"].service_account
+      namespace            = local.workload_identities["external_dns"].namespace
+      service_account      = local.workload_identities["external_dns"].service_account
       target_role_arn      = local.pod_identity_target_role_arns["external_dns"]
       disable_session_tags = try(var.pod_identity.overrides["external_dns"].disable_session_tags, null)
     }
@@ -890,8 +906,8 @@ module "cert_manager_pod_identity" {
   associations = {
     cluster = {
       cluster_name         = module.eks.cluster_name
-      namespace            = local.pod_identity_identities["cert_manager"].namespace
-      service_account      = local.pod_identity_identities["cert_manager"].service_account
+      namespace            = local.workload_identities["cert_manager"].namespace
+      service_account      = local.workload_identities["cert_manager"].service_account
       target_role_arn      = local.pod_identity_target_role_arns["cert_manager"]
       disable_session_tags = try(var.pod_identity.overrides["cert_manager"].disable_session_tags, null)
     }

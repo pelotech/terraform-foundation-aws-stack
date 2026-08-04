@@ -7,8 +7,9 @@ General usage documentation lives in the [README](README.md).
 
 EKS Pod Identity replaces IRSA as the default credential mechanism for the identities this
 module creates. The IRSA roles are **not** modified or removed in v9 — new Pod Identity roles are
-created alongside them, and the migration is reversible with one flag. v10.0.0 will delete the
-IRSA roles.
+created alongside them, and the migration is reversible with one flag. IRSA is not deprecated:
+Pod Identity cannot serve Fargate, so the roles stay indefinitely. v10.0.0 only flips the
+`irsa.enabled` default to `false`, making IRSA opt-in.
 
 ### ⚠️ Read this first if you run GovCloud with hosted zones in a commercial account
 
@@ -69,22 +70,16 @@ Karpenter is the one identity without a parallel role: its role already trusted
 
 ### Output renames
 
-The `*_role_arn` names now point at the **Pod Identity** roles, and the legacy IRSA roles moved to
-`*_irsa_role_arn`. Doing this in v9 means v10 only *deletes* the IRSA outputs — you take one
-naming break instead of two.
+The `*_role_arn` names now point at the **Pod Identity** roles, and the IRSA roles moved to
+`*_irsa_role_arn`. Both sets are permanent; this is a one-time naming break.
+
+Applies to all five of `load_balancer_controller`, `ebs_csi_driver`, `s3_csi_driver`,
+`external_dns`, `cert_manager`:
 
 | v8 output | v9 output | Points at |
 | --------- | --------- | --------- |
-| `load_balancer_controller_role_arn` | `load_balancer_controller_irsa_role_arn` | IRSA role (deprecated) |
-| `ebs_csi_driver_role_arn` | `ebs_csi_driver_irsa_role_arn` | IRSA role (deprecated) |
-| `s3_csi_driver_role_arn` | `s3_csi_driver_irsa_role_arn` | IRSA role (deprecated) |
-| `external_dns_role_arn` | `external_dns_irsa_role_arn` | IRSA role (deprecated) |
-| `cert_manager_role_arn` | `cert_manager_irsa_role_arn` | IRSA role (deprecated) |
-| — | `load_balancer_controller_role_arn` | **Pod Identity role (new meaning)** |
-| — | `ebs_csi_driver_role_arn` | **Pod Identity role (new meaning)** |
-| — | `s3_csi_driver_role_arn` | **Pod Identity role (new meaning)** |
-| — | `external_dns_role_arn` | **Pod Identity role (new meaning)** |
-| — | `cert_manager_role_arn` | **Pod Identity role (new meaning)** |
+| `<identity>_role_arn` | `<identity>_irsa_role_arn` | IRSA role |
+| — | `<identity>_role_arn` | **Pod Identity role (new meaning)** |
 | `karpenter_role_arn` | `karpenter_role_arn` | unchanged — one role, both mechanisms |
 
 **The five reused names silently change meaning.** If you consume `cert_manager_role_arn` to write
@@ -124,24 +119,23 @@ harmless, since it is not used for verification.
 
 ### Choosing a mechanism: `irsa` and `pod_identity`
 
-The two toggles are independent, which gives three usable states:
+v8 was all IRSA. v9 defaults to **both** — every identity gets a role for each mechanism, so the
+cutover needs no IAM change and rolls back with one flag.
 
-| `irsa.enabled` | `pod_identity.enabled` | State |
-| -------------- | ---------------------- | ----- |
-| `true` | `false` | All IRSA — v8 behavior, and the rollback target |
-| `true` | `true` | **Both — the v9 default.** Every identity has a role for each mechanism |
-| `false` | `true` | All Pod Identity — the v10 end state, reachable now |
+Run the v10 default early to validate it while that rollback is still cheap:
 
-Both `false` is rejected at plan; it would create no workload identity roles at all. Use
-`create = false` if you want nothing.
+```hcl
+irsa = { enabled = false }   # v10 default; revert to true to roll back
+```
 
-Running the end state early is the point of the `irsa` toggle: you can validate
-`irsa = { enabled = false }` under v9 and roll back with one flag, instead of discovering problems
-at the v10 major where the roles are gone for good.
+Both variables also resolve per identity via `overrides`, which is how a Fargate-scheduled
+controller stays on IRSA while the rest of the cluster moves. Moving the last identity off IRSA also
+drops the cluster's IAM OIDC provider unless you set `irsa = { create_oidc_provider = true }` —
+relevant if you have out-of-band roles federating against it, and to the GovCloud case above.
 
-Note what disabling IRSA also removes: the cluster's **IAM OIDC provider**. That nulls
-`eks_oidc_provider_arn` and breaks any out-of-band role that federates against it. The issuer URL
-(`eks_oidc_provider`) is a property of the cluster and survives — see the GovCloud section above.
+Full reference for both variables, including the per-identity overrides, the Karpenter edge cases
+and the OIDC provider rules: see ["Choosing a mechanism"](README.md#choosing-a-mechanism) in the
+README.
 
 ### What happens on first apply against an existing cluster
 
@@ -157,10 +151,10 @@ Pods pick up the new credentials at their next restart, not at apply time.
 
 Karpenter has a single role rather than a parallel one, but that role trusts **both** mechanisms
 simultaneously: the upstream submodule always emits a `pods.eks.amazonaws.com` trust statement, and
-the web-identity statement is now keyed off `irsa.enabled` rather than off Pod Identity. So with
-the default (both enabled) it holds the web-identity trust *and* an association at once, and gets
-the same dual-mode window as everything else. Its trust policy is only rewritten when you actually
-turn IRSA off.
+the web-identity statement is keyed off `irsa` rather than off Pod Identity. So with the default
+(both enabled) it holds the web-identity trust *and* an association at once, getting the same
+dual-mode window as everything else — its trust policy is only rewritten when you turn IRSA off for
+`karpenter`.
 
 ### Rollback
 
@@ -174,8 +168,9 @@ were never touched, and Karpenter keeps its web-identity trust throughout.
 ### After migrating
 
 Remove the `eks.amazonaws.com/role-arn` annotations from your Helm values / GitOps layer once
-Pod Identity is confirmed working. v10.0.0 deletes the IRSA roles and the `*_irsa_role_arn`
-outputs; the `*_role_arn` names are already final and will not change again.
+Pod Identity is confirmed working. v10.0.0 flips the `irsa.enabled` default to `false`, so set it
+explicitly if you still want IRSA roles for every identity — the roles and the `*_irsa_role_arn`
+outputs themselves are permanent. The `*_role_arn` names are already final and will not change again.
 
 ### `create = false` now plans
 

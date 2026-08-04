@@ -96,30 +96,64 @@ variable "addons" {
 
 variable "irsa" {
   description = <<-EOT
-    IRSA (IAM Roles for Service Accounts) for the workload identities this module creates.
+    IRSA (IAM Roles for Service Accounts) for the workload identities this module creates
+    (load_balancer_controller, ebs_csi_driver, s3_csi_driver, external_dns, cert_manager, karpenter).
 
-    Together with `pod_identity` this gives three states:
-      irsa on,  pod_identity off — all IRSA (pre-v9 behavior, and the rollback target)
-      irsa on,  pod_identity on  — both, the default; every identity has a role for each
-                                   mechanism so a cutover is reversible without an IAM change
-      irsa off, pod_identity on  — all Pod Identity, the v10 end state
+    Resolves per identity exactly like `pod_identity`: the override wins, otherwise `enabled`. The
+    two mechanisms are independent, so each identity is on IRSA, on Pod Identity, on both (the
+    default, which makes a cutover reversible without an IAM change), or on neither.
 
-    Disabling also tears down the cluster's IAM OIDC provider, which nulls the
-    eks_oidc_provider_arn output and breaks any out-of-band role that federates against it. The
-    issuer URL itself (eks_oidc_provider) is a property of the cluster and survives.
+    Mixing matters because the eks-pod-identity-agent is a DaemonSet and does not run on Fargate: a
+    controller scheduled onto Fargate has to stay on IRSA while the rest of the cluster moves, so
+    `enabled = false` with an override re-enabling that one identity is the expected shape.
 
-    Karpenter is not an exception here. It has a single role that trusts both mechanisms, so with
-    both enabled it holds the web-identity trust AND a Pod Identity association at the same time.
+    Leaving an identity on neither mechanism is allowed — use it when you manage that role out of
+    band — but this module then creates no role for it, and nothing warns you at plan time.
+
+    enabled              — v10.0.0 flips this default to false, making IRSA opt-in. The roles and
+                           the *_irsa_role_arn outputs are permanent; only the default changes.
+    create_oidc_provider — null (default) creates the cluster's IAM OIDC provider whenever any
+                           identity resolves to IRSA. Set true to keep it after the last identity
+                           has moved, for out-of-band roles that federate against it. The issuer URL
+                           (eks_oidc_provider) belongs to the cluster and survives either way.
+
+    Karpenter has one role trusting both mechanisms rather than a role per mechanism, so it behaves
+    differently at the edges — see README, "Choosing a mechanism".
   EOT
   type = object({
-    enabled = optional(bool, true)
+    enabled              = optional(bool, true)
+    create_oidc_provider = optional(bool)
+    overrides = optional(map(object({
+      enabled = optional(bool)
+    })), {})
   })
   default  = {}
   nullable = false
 
   validation {
-    condition     = var.irsa.enabled || var.pod_identity.enabled
-    error_message = "irsa.enabled and pod_identity.enabled cannot both be false: no workload identity roles would be created for any identity. Enable at least one mechanism, or set create = false to provision nothing."
+    condition = alltrue([
+      for k in keys(var.irsa.overrides) : contains([
+        "load_balancer_controller",
+        "ebs_csi_driver",
+        "s3_csi_driver",
+        "external_dns",
+        "cert_manager",
+        "karpenter",
+      ], k)
+    ])
+    error_message = "irsa.overrides keys must be one of: load_balancer_controller, ebs_csi_driver, s3_csi_driver, external_dns, cert_manager, karpenter."
+  }
+
+  validation {
+    # Every IRSA role, and karpenter's web-identity trust statement, interpolates the provider ARN.
+    # Without this the plan fails deep inside the upstream module with "provider_arn is null".
+    # Deliberately stricter than local.irsa_enabled: enabled = true with all six identities
+    # overridden off is rejected rather than picked apart. Write enabled = false instead.
+    condition = coalesce(var.irsa.create_oidc_provider, true) || (
+      !var.irsa.enabled &&
+      !anytrue([for v in var.irsa.overrides : coalesce(v.enabled, false)])
+    )
+    error_message = "irsa.create_oidc_provider = false requires irsa.enabled = false and no override re-enabling an identity: the IRSA roles federate against the provider being suppressed. Leave create_oidc_provider null to let it follow usage instead."
   }
 }
 
@@ -129,16 +163,17 @@ variable "pod_identity" {
     ebs_csi_driver, s3_csi_driver, external_dns, cert_manager, karpenter).
 
     When enabled, each identity gets its own Pod Identity role plus an association, and the
-    `eks-pod-identity-agent` addon is installed. The legacy IRSA roles are left untouched and keep
-    their own ARNs, so disabling an identity is a no-op on existing state.
+    `eks-pod-identity-agent` addon is installed. The IRSA roles are left untouched and keep their
+    own ARNs, so disabling an identity is a no-op on existing state.
 
     NOTE: Pod Identity takes precedence over an `eks.amazonaws.com/role-arn` service account
     annotation. Disable an identity here to keep IRSA serving it.
 
     overrides (keyed by identity name):
-      enabled              — false leaves the identity on IRSA (required in GovCloud for
-                             cert_manager/external_dns when the hosted zones live in a commercial
-                             account, since IAM cannot assume a role across partitions).
+      enabled              — false leaves the identity to `irsa`, which may itself be off for it
+                             (required in GovCloud for cert_manager/external_dns when the hosted
+                             zones live in a commercial account, since IAM cannot assume a role
+                             across partitions).
       target_role_arn      — cross-account role chaining. The target role holds the permissions,
                              so the predefined policy is replaced by an sts:AssumeRole grant.
                              Same-partition only; not supported for karpenter.

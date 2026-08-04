@@ -313,17 +313,22 @@ run "create_false_disables_pod_identity" {
 ################################################################################
 # irsa / pod_identity matrix
 #
-# The two toggles are independent, giving all-IRSA, both (the default transition state), and
-# all-Pod-Identity. Karpenter is NOT an exception: its single role trusts both mechanisms, so in
-# "both" mode it carries the web-identity trust and an association at the same time.
+# Both variables resolve per identity and independently, giving all-IRSA, both (the default
+# transition state), all-Pod-Identity, and any per-identity mix. Karpenter is NOT an exception:
+# its single role trusts both mechanisms, so in "both" mode it carries the web-identity trust and
+# an association at the same time.
 ################################################################################
 
 run "both_mechanisms_by_default" {
   command = plan
 
   assert {
-    condition     = output.irsa_enabled_resolved == true && alltrue(values(output.pod_identity_enabled_resolved))
+    condition     = alltrue(values(output.irsa_enabled_resolved)) && alltrue(values(output.pod_identity_enabled_resolved))
     error_message = "the default must create both mechanisms so a cutover is reversible"
+  }
+  assert {
+    condition     = output.irsa_oidc_provider_enabled_resolved == true
+    error_message = "the OIDC provider must exist while identities are on IRSA"
   }
 }
 
@@ -335,7 +340,7 @@ run "all_irsa" {
   }
 
   assert {
-    condition     = output.irsa_enabled_resolved == true
+    condition     = alltrue(values(output.irsa_enabled_resolved))
     error_message = "irsa must stay on when only pod identity is disabled"
   }
   assert {
@@ -356,7 +361,7 @@ run "all_pod_identity" {
   }
 
   assert {
-    condition     = output.irsa_enabled_resolved == false
+    condition     = !anytrue(values(output.irsa_enabled_resolved))
     error_message = "irsa.enabled = false must disable the legacy roles"
   }
   assert {
@@ -372,7 +377,7 @@ run "all_pod_identity" {
   # Tearing down the OIDC provider is part of disabling IRSA; the issuer URL survives because it
   # is a property of the cluster, which is what a cross-partition setup actually federates against.
   assert {
-    condition     = output.eks_oidc_provider_arn == null
+    condition     = output.eks_oidc_provider_arn == null && output.irsa_oidc_provider_enabled_resolved == false
     error_message = "the cluster OIDC provider must be torn down when IRSA is disabled"
   }
   assert {
@@ -381,12 +386,132 @@ run "all_pod_identity" {
   }
 }
 
-run "both_mechanisms_disabled_rejected" {
+# The motivating case: the eks-pod-identity-agent DaemonSet cannot run on Fargate, so a controller
+# scheduled there stays on IRSA while everything else moves. One identity on IRSA is enough to keep
+# the OIDC provider alive.
+run "mixed_mechanisms_per_identity" {
   command = plan
 
   variables {
-    irsa         = { enabled = false }
-    pod_identity = { enabled = false }
+    irsa = {
+      enabled = false
+      overrides = {
+        external_dns = { enabled = true }
+      }
+    }
+  }
+
+  assert {
+    condition     = output.irsa_enabled_resolved["external_dns"] == true
+    error_message = "an irsa override must win over irsa.enabled = false"
+  }
+  # Only the null side is asserted on the ARNs: a created role's ARN is unknown at plan time, so
+  # `!= null` cannot be evaluated. irsa_enabled_resolved above covers the positive case.
+  assert {
+    condition = (
+      output.load_balancer_controller_irsa_role_arn == null &&
+      output.ebs_csi_driver_irsa_role_arn == null &&
+      output.s3_csi_driver_irsa_role_arn == null &&
+      output.cert_manager_irsa_role_arn == null
+    )
+    error_message = "only the overridden identity may keep its IRSA role"
+  }
+  assert {
+    condition     = output.irsa_oidc_provider_enabled_resolved == true
+    error_message = "one identity still on IRSA must keep the OIDC provider"
+  }
+  assert {
+    condition     = alltrue(values(output.pod_identity_enabled_resolved))
+    error_message = "the irsa overrides must not touch Pod Identity enablement"
+  }
+}
+
+# Both mechanisms off for an identity is legal — the consumer manages that role out of band.
+run "identity_opted_out_of_both_mechanisms" {
+  command = plan
+
+  variables {
+    irsa         = { overrides = { cert_manager = { enabled = false } } }
+    pod_identity = { overrides = { cert_manager = { enabled = false } } }
+  }
+
+  assert {
+    condition     = output.cert_manager_irsa_role_arn == null && output.cert_manager_role_arn == null
+    error_message = "an identity off both mechanisms must get no role from this module"
+  }
+  assert {
+    condition     = !contains(keys(output.pod_identity_associations_resolved), "cert_manager")
+    error_message = "an identity off both mechanisms must get no association"
+  }
+  # Regression guard: the other five identities must be untouched by one identity opting out.
+  assert {
+    condition     = output.irsa_enabled_resolved["external_dns"] == true && output.pod_identity_enabled_resolved["external_dns"] == true
+    error_message = "opting one identity out must not affect the others"
+  }
+}
+
+# Keeping the provider after the last identity has moved, for out-of-band roles federating with it.
+run "oidc_provider_forced_on" {
+  command = plan
+
+  variables {
+    irsa = { enabled = false, create_oidc_provider = true }
+  }
+
+  assert {
+    condition     = output.irsa_oidc_provider_enabled_resolved == true
+    error_message = "create_oidc_provider = true must keep the provider with no identity on IRSA"
+  }
+  assert {
+    condition     = !anytrue(values(output.irsa_enabled_resolved))
+    error_message = "create_oidc_provider must not re-enable any IRSA role"
+  }
+}
+
+# Without this validation the plan fails deep inside the upstream module with "provider_arn is null".
+run "oidc_provider_forced_off_with_irsa_rejected" {
+  command = plan
+
+  variables {
+    irsa = { enabled = true, create_oidc_provider = false }
+  }
+
+  expect_failures = [var.irsa]
+}
+
+# The validation keys off `enabled` rather than picking the overrides apart, so this is rejected even
+# though no identity actually resolves to IRSA. Deliberate: write `enabled = false` instead. Pinned
+# here so the stricter reading is not "fixed" back into a per-identity walk.
+run "oidc_provider_forced_off_with_all_identities_overridden_rejected" {
+  command = plan
+
+  variables {
+    irsa = {
+      enabled              = true
+      create_oidc_provider = false
+      overrides = {
+        load_balancer_controller = { enabled = false }
+        ebs_csi_driver           = { enabled = false }
+        s3_csi_driver            = { enabled = false }
+        external_dns             = { enabled = false }
+        cert_manager             = { enabled = false }
+        karpenter                = { enabled = false }
+      }
+    }
+  }
+
+  expect_failures = [var.irsa]
+}
+
+run "irsa_unknown_override_key_rejected" {
+  command = plan
+
+  variables {
+    irsa = {
+      overrides = {
+        cert_managr = { enabled = false }
+      }
+    }
   }
 
   expect_failures = [var.irsa]
