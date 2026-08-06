@@ -4,19 +4,14 @@ data "aws_caller_identity" "current" {}
 locals {
   permissions_boundary_arn = var.permissions_boundary != "" ? "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary}" : null
   is_arm                   = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.pelotech_nat.instance_type))
-  # Derive the node AMI arch from the requested instance types (Graviton family
-  # names carry a "g", e.g. m7g/c6gd/t4g). Same detection as is_arm above; the
-  # a1 family (no "g") is not detected. initial_node.instance_types validates arch
-  # agreement, so index [0] is representative.
+  # Graviton names carry a "g" (m7g/c6gd/t4g); the a1 family is not detected. Arch agreement across
+  # instance_types is validated, so index [0] is representative.
   initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_node.instance_types[0]))
-  # One expansion for the three managed access groups. The map keys ("admin_0", "admin_ro_0",
-  # "ro_0", ...) and association keys are state addresses inside the EKS module's for_each.
-  #
-  # WARNING: these keys are POSITIONAL. Removing or reordering an ARN in the middle of one of the
-  # access.*_arns lists re-keys every entry after it, which destroys and recreates those access
-  # entries. Append new ARNs to the end of a list; when removing one, expect churn for the
-  # entries that follow it. A duplicate ARN across groups also collides server-side (EKS keys
-  # access entries by principal ARN) and fails with ResourceInUseException.
+
+  # WARNING: the generated keys ("admin_0", "admin_ro_0", ...) are POSITIONAL state addresses.
+  # Removing or reordering an ARN mid-list re-keys every entry after it, which destroys and
+  # recreates those access entries. Append only. A duplicate ARN across groups also collides
+  # server-side (EKS keys access entries by principal ARN) and fails with ResourceInUseException.
   access_entry_groups = {
     admin    = { arns = var.access.admin_arns, assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
     admin_ro = { arns = var.access.admin_ro_arns, assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
@@ -42,11 +37,9 @@ locals {
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 
-  # Workload identities served by this module, and the key set both mechanisms resolve over. These
-  # namespace/service-account pairs are the contract with the consumer's GitOps layer: they are
-  # deliberately NOT the upstream chart defaults (kube-system:ebs-csi-driver, not
-  # ebs-csi-controller-sa; alb, not kube-system), and they must match what the legacy IRSA roles
-  # already trust or an association silently misses.
+  # WARNING: deliberately NOT the upstream chart defaults (kube-system:ebs-csi-driver, not
+  # ebs-csi-controller-sa; alb, not kube-system). These pairs must match what the IRSA roles already
+  # trust and what the GitOps layer deploys, or the association silently serves nothing.
   workload_identities = {
     load_balancer_controller = { namespace = "alb", service_account = "aws-load-balancer-controller" }
     ebs_csi_driver           = { namespace = "kube-system", service_account = "ebs-csi-driver" }
@@ -56,26 +49,19 @@ locals {
     karpenter                = { namespace = "karpenter", service_account = "karpenter" }
   }
 
-  # The two mechanisms resolve identically and independently: per-identity override wins, otherwise
-  # the global toggle, and var.create gates both.
-
-  # An identity can therefore stay on IRSA while the rest of the cluster is on Pod Identity — needed
-  # for anything scheduled on Fargate, where the agent DaemonSet cannot run.
+  # The two mechanisms resolve identically and independently, so an identity can stay on IRSA while
+  # the rest of the cluster moves to Pod Identity — needed on Fargate, where the agent cannot run.
   irsa_enabled = {
     for k in keys(local.workload_identities) : k =>
     var.create && coalesce(try(var.irsa.overrides[k].enabled, null), var.irsa.enabled)
   }
 
-  # Disabling an identity here creates no Pod Identity role and no association, leaving whatever
-  # irsa_enabled resolves to for it to keep serving the workload.
   pod_identity_enabled = {
     for k in keys(local.workload_identities) : k =>
     var.create && coalesce(try(var.pod_identity.overrides[k].enabled, null), var.pod_identity.enabled)
   }
 
-  # The provider follows usage rather than a flag, because every IRSA role interpolates its ARN.
-  # Forcing it true keeps it alive for out-of-band roles once the last identity has moved off IRSA;
-  # forcing it false while an identity still uses IRSA is rejected by var.irsa's validation.
+  # Follows usage rather than a flag, because every IRSA role interpolates the provider ARN.
   irsa_oidc_provider_enabled = var.create && coalesce(
     var.irsa.create_oidc_provider,
     anytrue(values(local.irsa_enabled)),
@@ -86,22 +72,18 @@ locals {
     local.pod_identity_enabled[k] ? try(var.pod_identity.overrides[k].target_role_arn, null) : null
   }
 
-  # Route53 scoping for the DNS identities. Null (unset) keeps the historic unscoped grant.
+  # Unset keeps the historic unscoped grant.
   pod_identity_hosted_zone_arns = {
     for k in ["cert_manager", "external_dns"] : k =>
     try(var.pod_identity.overrides[k].hosted_zone_arns, null) != null ? var.pod_identity.overrides[k].hosted_zone_arns : ["*"]
   }
 
-  # An empty ARN list makes the upstream mountpoint policy fall back to arn:<partition>:s3:::* for
-  # s3:ListBucket and emit an empty-Resource statement for object access. Skip the policy instead.
-  # Derived from the inputs rather than local.s3_csi_arns: the created bucket's ARN is unknown at
-  # plan time, and this value gates a count inside the upstream policy module.
+  # Derived from the inputs, not s3_csi_arns: the created bucket's ARN is unknown at plan time and
+  # this gates a count. An empty list would emit an empty-Resource statement, so skip the policy.
   attach_s3_csi_policy = var.s3_csi.create_bucket || length(var.s3_csi.bucket_arns) > 0
 
-  # OVERWRITE on create lets AWS adopt any pre-existing self-managed daemonsets into the managed-addons API.
-  # before_compute on vpc-cni installs the addon ahead of node groups so pods get IPs immediately.
-  # preserve=false overrides the upstream module default (true) so disabling an addon also removes
-  # its underlying workload (e.g. aws-node DaemonSet) — required for clean CNI swaps.
+  # OVERWRITE adopts pre-existing self-managed daemonsets; preserve=false overrides the upstream
+  # default so disabling an addon also removes its workload, required for clean CNI swaps.
   cluster_addon_defaults = {
     "vpc-cni" = {
       most_recent                 = true
@@ -116,9 +98,8 @@ locals {
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
     }
-    # configuration_values.tolerations REPLACES the addon's defaults rather than appending, so it
-    # is only set when the CNI profile actually needs something beyond stock. Stock already
-    # tolerates CriticalAddonsOnly, which is why cilium and vpc-cni need nothing here.
+    # tolerations REPLACES the addon's defaults rather than appending, so only set it when the
+    # profile needs something beyond stock (which already tolerates CriticalAddonsOnly).
     "coredns" = merge({
       most_recent                 = true
       preserve                    = false
@@ -127,17 +108,10 @@ locals {
       }, length(local.coredns_tolerations) > 0 ? {
       configuration_values = jsonencode({ tolerations = local.coredns_tolerations })
     } : {})
-    # Required for Pod Identity: the agent vends credentials to pods over a link-local address.
-    # Without it, associations exist but pods get nothing.
-    #
-    # before_compute puts the agent in the upstream aws_eks_addon.before_compute resource, which
-    # skips the depends_on [node groups] carried by the regular one. Without it the agent is created
-    # LAST — after every node group — while the pod identity associations are created before them,
-    # so a node-group failure leaves associations with no agent and nothing pointing at the cause.
-    # It is a head start, not a graph edge (upstream implements it by bypassing the 30s
-    # time_sleep.this gate that node groups pass through), but it moves the agent ahead of the
-    # failure point. Safe with zero nodes: a DaemonSet addon has no desired replicas and reports
-    # ACTIVE, exactly as vpc-cni already does on this same path.
+    # before_compute is a head start, not a graph edge: it skips the depends_on [node groups] the
+    # regular addon resource carries. Without it the agent is created last, after every node group,
+    # while the associations are created before them — so a node-group failure leaves associations
+    # with no agent and nothing pointing at the cause.
     "eks-pod-identity-agent" = {
       most_recent                 = true
       before_compute              = true
@@ -146,18 +120,9 @@ locals {
       resolve_conflicts_on_update = "OVERWRITE"
     }
   }
-  # CNI profiles: var.cni selects the taints/labels and vpc-cni/kube-proxy addon
-  # enablement appropriate for the chosen CNI. Individual pieces stay overridable
-  # (initial_node.taints(_extra)/labels(_extra) and the addons toggles).
-  # `system_node` describes the initial/system node group's taints/labels (coredns +
-  # critical addons). `cni_node` (null unless the CNI needs it) describes, with the
-  # same shape, a dedicated node group for the CNI's control plane — kube-ovn's
-  # ovn-central, which pins to its master nodes' IPs and so must be recycled
-  # (destroy/recreate) rather than rolled.
-  #
-  # `coredns_tolerations` is the counterpart to those taints: what coredns must tolerate BEYOND the
-  # addon's own defaults, which already cover CriticalAddonsOnly. Keep it minimal — a toleration
-  # coredns does not need lets it schedule somewhere the design assumes it will not.
+  # cni_node is null unless the CNI needs a dedicated control-plane group. coredns_tolerations is
+  # only what coredns must tolerate BEYOND the addon's defaults — keep it minimal, since a
+  # toleration coredns does not need lets it schedule somewhere the design assumes it will not.
   cni_profiles = {
     cilium = {
       system_node = {
@@ -168,9 +133,8 @@ locals {
         labels = {}
       }
       cni_node = null
-      # None needed. CriticalAddonsOnly is a stock coredns toleration, and cilium-operator removes
-      # node.cilium.io/agent-not-ready once the agent is ready (EKS does not re-apply it), so the
-      # taint gates coredns only until the CNI is actually usable — which is what it is for.
+      # cilium-operator removes agent-not-ready once ready, so the taint gates coredns only until
+      # the CNI is usable. CriticalAddonsOnly is already stock.
       coredns_tolerations     = []
       enable_vpc_cni_addon    = false
       enable_kube_proxy_addon = false # cilium kube-proxy replacement
@@ -190,13 +154,12 @@ locals {
         }
         labels = { "kube-ovn/role" = "master" }
       }
-      # The nidhogg gates only. Without these coredns deadlocks behind the multus/pinger DaemonSets.
+      # The nidhogg gates only; without them coredns deadlocks behind the multus/pinger DaemonSets.
       #
-      # Deliberately NOT kube-ovn.io/control-plane: the dedicated CNI node group is destroyed and
-      # recreated on every kube-ovn recycle, and the runbook (README "Node upgrades on kube-ovn")
-      # promises DNS survives that because coredns is not on it. Tolerating that taint would let
-      # coredns land there — it is the emptiest node right after a recycle, which is exactly what
-      # the scheduler prefers — and take DNS down alongside ovn-central.
+      # WARNING: do NOT add kube-ovn.io/control-plane. The CNI node group is destroyed and recreated
+      # on every recycle, and the runbook promises DNS survives because coredns is not on it.
+      # Tolerating that taint lets coredns land there — it is the emptiest node right after a
+      # recycle, exactly what the scheduler prefers — taking DNS down alongside ovn-central.
       coredns_tolerations = [
         { key = "nidhogg.uswitch.com/kube-system.kube-ovn-pinger", operator = "Exists" },
         { key = "nidhogg.uswitch.com/kube-system.kube-multus-ds", operator = "Exists" },
@@ -211,8 +174,7 @@ locals {
         }
         labels = {}
       }
-      cni_node = null
-      # None needed: CriticalAddonsOnly is the only taint and the coredns addon already tolerates it.
+      cni_node                = null
       coredns_tolerations     = []
       enable_vpc_cni_addon    = true
       enable_kube_proxy_addon = true
@@ -220,12 +182,10 @@ locals {
   }
   cni_profile = local.cni_profiles[var.cni]
 
-  # Override model: full-override var wins entirely (null = derive); otherwise preset + _extra merge.
+  # Full-override var wins entirely (null = derive); otherwise preset + _extra merge.
   initial_taints = var.initial_node.taints != null ? var.initial_node.taints : merge(local.cni_profile.system_node.taints, var.initial_node.taints_extra)
   initial_labels = var.initial_node.labels != null ? var.initial_node.labels : merge(local.cni_profile.system_node.labels, var.initial_node.labels_extra)
 
-  # Dedicated CNI node group (kube-ovn control plane): exists only for profiles that
-  # define cni_node, and can be toggled off (recycle) via var.cni_node.enabled.
   enable_cni_node_group   = local.cni_profile.cni_node != null && coalesce(var.cni_node.enabled, true)
   cni_node_taints         = try(local.cni_profile.cni_node.taints, {})
   cni_node_labels         = try(local.cni_profile.cni_node.labels, {})
@@ -233,7 +193,6 @@ locals {
   cni_node_instance_types = coalesce(var.cni_node.instance_types, var.initial_node.instance_types)
   cni_node_is_arm         = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", local.cni_node_instance_types[0]))
 
-  # Settings shared by both managed node groups (per-group bits merged on top below).
   node_group_common = {
     iam_role_use_name_prefix       = false
     iam_role_permissions_boundary  = local.permissions_boundary_arn
@@ -262,11 +221,9 @@ locals {
     timeouts                     = var.initial_node.timeouts
   }
 
-  # Addon toggles: explicit bool wins; null = derive from CNI profile.
-  enable_vpc_cni_addon    = var.addons.vpc_cni != null ? var.addons.vpc_cni : local.cni_profile.enable_vpc_cni_addon
-  enable_kube_proxy_addon = var.addons.kube_proxy != null ? var.addons.kube_proxy : local.cni_profile.enable_kube_proxy_addon
-
-  # Explicit bool wins; null = on whenever at least one identity uses Pod Identity.
+  # Explicit bool wins; null derives from the CNI profile / Pod Identity usage.
+  enable_vpc_cni_addon      = var.addons.vpc_cni != null ? var.addons.vpc_cni : local.cni_profile.enable_vpc_cni_addon
+  enable_kube_proxy_addon   = var.addons.kube_proxy != null ? var.addons.kube_proxy : local.cni_profile.enable_kube_proxy_addon
   enable_pod_identity_agent = var.addons.pod_identity_agent != null ? var.addons.pod_identity_agent : anytrue(values(local.pod_identity_enabled))
 
   cluster_addons_enabled = {
@@ -327,10 +284,8 @@ module "vpc" {
 }
 
 locals {
-  nat_tailscale_enabled = var.pelotech_nat.enabled && var.pelotech_nat.tailscale.enabled
-  # Module creates the SSM parameter when a plain key is supplied
-  nat_tailscale_create_ssm = local.nat_tailscale_enabled && var.pelotech_nat_tailscale_auth_key != ""
-  # Effective SSM parameter name - the XOR validation on the variable guarantees exactly one source
+  nat_tailscale_enabled       = var.pelotech_nat.enabled && var.pelotech_nat.tailscale.enabled
+  nat_tailscale_create_ssm    = local.nat_tailscale_enabled && var.pelotech_nat_tailscale_auth_key != ""
   nat_tailscale_auth_key_ssm  = var.pelotech_nat.tailscale.auth_key_ssm != "" ? var.pelotech_nat.tailscale.auth_key_ssm : "/${var.name}/nat/tailscale-auth-key"
   nat_tailscale_hostname_base = var.pelotech_nat.tailscale.hostname != "" ? var.pelotech_nat.tailscale.hostname : var.name
 
@@ -346,9 +301,7 @@ locals {
     ])
   } : {}
 
-  # Appended after the fck-nat module's own user_data part, which writes the
-  # base /etc/fck-nat.conf and restarts the service. Quoted heredoc so nothing
-  # is shell-expanded at boot.
+  # Appended after fck-nat's own user_data part. Quoted heredoc so nothing expands at boot.
   nat_tailscale_cloud_init_by_az = {
     for az, lines in local.nat_tailscale_conf_by_az : az => {
       content_type = "text/x-shellscript"
@@ -415,15 +368,11 @@ resource "aws_eip" "main" {
 }
 
 module "fck_nat" {
-  # Temporary fork carrying https://github.com/RaJiska/terraform-aws-fck-nat/pull/84 (derive the
-  # partition and DNS suffix for IAM ARNs and the service principal) — required for GovCloud.
+  # Temporary fork carrying RaJiska/terraform-aws-fck-nat#84 (partition-aware IAM ARNs) for GovCloud.
   #
-  # REVERT TRIGGER: PR #84 merged 2026-08-01, so the blocker is no longer the PR but the release.
-  # Check for an upstream tag >= v1.6.1; when one exists, restore:
-  #     source  = "RaJiska/fck-nat/aws"
-  #     version = ">= 1.6.1"
-  # and delete this fork. Renovate cannot see this dependency: the git:: source with a non-semver
-  # tag is invisible to its datasources, so nothing will nag us automatically.
+  # REVERT TRIGGER: #84 merged 2026-08-01; waiting on a release. When an upstream tag >= v1.6.1
+  # exists, restore source = "RaJiska/fck-nat/aws" and delete this fork. Renovate cannot see a git::
+  # source with a non-semver tag, so nothing will nag us automatically.
   source             = "git::https://github.com/josmo/terraform-aws-fck-nat.git?ref=v1.6.1-pre-josmo"
   count              = var.pelotech_nat.enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
@@ -448,10 +397,7 @@ module "fck_nat" {
 
 data "aws_region" "current" {}
 
-# Private VPC endpoints so nodes reach ECR/STS/SSM/EC2 (and are SSM-debuggable)
-# without depending on NAT egress. Kubelet->API already works privately via the
-# cluster's endpoint_private_access ENIs. Opt-in by listing services in
-# var.vpc_endpoints (empty = none). Internal (module-created) VPC only.
+# Lets nodes reach ECR/STS/SSM/EC2 without NAT egress. Internal (module-created) VPC only.
 # https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/using-govcloud-vpc-endpoints.html
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
@@ -472,9 +418,7 @@ module "vpc_endpoints" {
     }
   }
 
-  # s3/dynamodb are free Gateway endpoints (routed via the private route tables);
-  # everything else is an Interface endpoint. Each service is opt-in via the list,
-  # so e.g. vpc_endpoints = ["s3"] provisions only the S3 gateway.
+  # s3/dynamodb are free Gateway endpoints; everything else is a paid Interface endpoint.
   endpoints = merge(
     {
       for s in var.vpc_endpoints : replace(s, ".", "_") => {
@@ -519,8 +463,7 @@ module "eks" {
   } : {}
   kms_key_administrators = var.create_cluster_kms ? concat(var.access.admin_arns, var.access.admin_ro_arns) : []
   eks_managed_node_groups = merge(
-    # Initial / system group (coredns + critical addons). Follows the control-plane
-    # version and rolls in place on upgrade.
+    # Follows the control-plane version and rolls in place on upgrade.
     var.initial_node.enabled ? {
       "initial-${var.name}" = merge(local.node_group_common, {
         instance_types = var.initial_node.instance_types
@@ -533,8 +476,7 @@ module "eks" {
         # Only set when true so the upstream module's default stays in charge otherwise.
       }, var.initial_node.force_update_version ? { force_update_version = true } : {})
     } : {},
-    # Dedicated CNI control-plane group (kube-ovn). Version-pinned and recycled
-    # (destroy/recreate) on upgrade so the initial group + coredns are untouched.
+    # Version-pinned and recycled (destroy/recreate) on upgrade, so the initial group is untouched.
     local.enable_cni_node_group ? {
       "cni-${var.name}" = merge(local.node_group_common, {
         instance_types      = local.cni_node_instance_types
@@ -551,19 +493,15 @@ module "eks" {
   )
   access_entries = merge(local.managed_access_entries, local.extra_access_entries)
   tags = merge(var.tags, {
-    # NOTE - if creating multiple security groups with this module, only tag the
-    # security group that Karpenter should utilize with the following tag
-    # (i.e. - at most, only one security group should have this tag in your account)
+    # At most one security group per account may carry this tag.
     "karpenter.sh/discovery" = var.name
   })
 }
-# Karpenter is the one identity that needs no parallel role: the upstream submodule always emits a
-# `pods.eks.amazonaws.com` trust statement, so its existing role already works with Pod Identity.
-# This doc bolts web-identity on top and is dropped once the association takes over.
-data "aws_iam_policy_document" "source" { # allow usage with irsa
-  # Gated on local.irsa_enabled, which folds in var.create: module.eks.oidc_provider is null when
-  # the cluster is not created, and oidc_provider_arn is null when the OIDC provider is not
-  # created — either way interpolating them here fails at plan time.
+
+# Bolts web-identity onto Karpenter's role, which already trusts pods.eks.amazonaws.com upstream.
+data "aws_iam_policy_document" "source" {
+  # Folds in var.create: oidc_provider and oidc_provider_arn are null when not created, and
+  # interpolating either here fails at plan time.
   count = local.irsa_enabled["karpenter"] ? 1 : 0
 
   statement {
@@ -596,23 +534,18 @@ module "karpenter" {
   iam_role_use_name_prefix        = false
   node_iam_role_use_name_prefix   = false
   create_pod_identity_association = local.pod_identity_enabled["karpenter"]
-  # MUST be set explicitly: the submodule defaults to namespace "kube-system", but this stack runs
-  # Karpenter in the "karpenter" namespace (see the web-identity :sub condition above). Taking the
-  # default would associate a service account that does not exist and silently strand Karpenter.
+  # WARNING: must be set explicitly. The submodule defaults to namespace "kube-system"; taking that
+  # default associates a service account that does not exist and silently strands Karpenter.
   namespace                          = local.workload_identities["karpenter"].namespace
   service_account                    = local.workload_identities["karpenter"].service_account
   iam_role_permissions_boundary_arn  = local.permissions_boundary_arn
   node_iam_role_permissions_boundary = local.permissions_boundary_arn
-  # Keyed off IRSA, not Pod Identity, so the two are independent. The upstream submodule always
-  # emits a pods.eks.amazonaws.com trust statement, so with both mechanisms on this role holds the
-  # web-identity trust AND the association at once — Karpenter gets the same dual-mode window as
-  # the identities that have two separate roles. That same always-on statement is why turning both
-  # mechanisms off for karpenter still leaves the role: only this document and the association go.
+  # Keyed off IRSA, not Pod Identity, so this role can hold the web-identity trust and the
+  # association at once — the same dual-mode window the two-role identities get.
   iam_role_source_assume_policy_documents = local.irsa_enabled["karpenter"] ? data.aws_iam_policy_document.source[*].json : []
   tags                                    = var.tags
 }
 
-# IAM roles and policies for the cluster
 module "load_balancer_controller_irsa_role" {
   count   = local.irsa_enabled["load_balancer_controller"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
@@ -747,24 +680,16 @@ module "cert_manager_irsa_role" {
 ################################################################################
 # Pod Identity roles and associations
 #
-# These live alongside the IRSA roles above rather than replacing them, so for the five identities
-# below the upgrade is create-only and a rollback (pod_identity.enabled = false) needs no IAM
-# change. The role ARNs differ from the IRSA ones — audit any external resource policy naming the
-# old ARN.
+# These live alongside the IRSA roles rather than replacing them, so the ARNs differ — audit any
+# external resource policy naming the old one.
 #
-# Karpenter is the exception: it has no parallel role, so enabling Pod Identity MODIFIES its
-# existing role's trust policy (dropping the web-identity statement) in the same apply that creates
-# the association. It is the one identity with no dual-mode window. See UPGRADING.md.
-#
-# Beware: the input names here are NOT the same as the IRSA module's. This module uses
-# `permissions_boundary_arn`, `attach_aws_lb_controller_policy`, `attach_aws_ebs_csi_policy`,
+# WARNING: the input names differ from the IRSA module's. This one uses `permissions_boundary_arn`,
+# `attach_aws_lb_controller_policy`, `attach_aws_ebs_csi_policy`,
 # `mountpoint_s3_csi_bucket_path_arns`, and exports `iam_role_arn` (not `arn`).
 ################################################################################
 
-# Cross-account chaining: the local role only needs to assume the role that owns the target
-# resources. That target role carries the permissions, so the predefined policy is suppressed and
-# replaced by this grant. Same-partition only — IAM cannot assume a role across partitions, which
-# is why GovCloud clusters fall back to IRSA for commercial-account Route53.
+# The target role carries the permissions, so the predefined policy is suppressed for this grant.
+# Same-partition only, which is why GovCloud falls back to IRSA for commercial-account Route53.
 data "aws_iam_policy_document" "pod_identity_target_role" {
   for_each = { for k, v in local.pod_identity_target_role_arns : k => v if v != null }
 

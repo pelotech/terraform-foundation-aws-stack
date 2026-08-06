@@ -286,9 +286,8 @@ variable "pelotech_nat" {
     error_message = "Tailscale settings must not contain double quotes or newlines (values are written as key=\"value\" lines into /etc/fck-nat.conf)."
   }
   validation {
-    # NAT instances are placed into module-created public subnets and patched into module-created
-    # private route tables. With existing_vpc those outputs are empty while module.vpc.azs still
-    # returns var.vpc.azs, so the count is non-zero and subnet/route-table indexing fails.
+    # With existing_vpc the module-created subnet/route-table outputs are empty while module.vpc.azs
+    # still returns var.vpc.azs, so the count is non-zero and indexing fails.
     condition     = !var.pelotech_nat.enabled || var.existing_vpc == null
     error_message = "pelotech_nat.enabled cannot be combined with existing_vpc: the module can only place NAT instances in subnets and route tables it created. Manage NAT yourself in a pre-existing VPC."
   }
@@ -394,12 +393,6 @@ variable "access" {
   nullable = false
 }
 
-# --- Dedicated CNI node group (kube-ovn control plane) ---
-# For CNIs whose control plane is pinned to specific master nodes (kube-ovn's
-# ovn-central), a small dedicated node group hosts it so upgrades recycle it
-# WITHOUT draining the initial/system group (coredns + critical addons stay up).
-# Created by default only for cni = "kube-ovn".
-
 variable "cni_node" {
   description = "Dedicated CNI node group (kube-ovn control plane). enabled: null derives from cni (true for kube-ovn, false otherwise); set false, apply, then true again to recycle it (e.g. for a version/AMI upgrade) without touching the initial group. kubernetes_version: version this group runs — bump to upgrade it; decoupled from cluster_version so a control-plane bump doesn't auto-roll it (null follows cluster_version, REQUIRED for cni=\"kube-ovn\"); replace it deliberately via the recycle (toggle enabled + bump cni-bootstrap's bootstrap_generation). instance_types: null falls back to initial_node.instance_types; must all be one architecture. ami_release_version: pin the AMI release (e.g. a same-version security patch); null uses the default AMI for its kubernetes_version. size: node count (min=max=desired); default 1 = a single kube-ovn ovn-central master."
   type = object({
@@ -417,9 +410,8 @@ variable "cni_node" {
     error_message = "cni_node.kubernetes_version must be set when cni = \"kube-ovn\" so a control-plane version bump does not auto-roll the CNI master node (kube-ovn deadlock). Set it to the current node k8s version, then bump it deliberately during a recycle."
   }
   validation {
-    # coalesce rather than a `== null ||` guard: Terraform 1.9 (the required_version floor) does
-    # not short-circuit ||, so it still evaluates the for expression and fails with "Iteration over
-    # null value" whenever instance_types is unset — which is the default.
+    # coalesce, not `== null ||`: Terraform 1.9 does not short-circuit ||, so the for expression
+    # still evaluates and fails with "Iteration over null value" when instance_types is unset.
     condition     = length(distinct([for t in coalesce(var.cni_node.instance_types, []) : can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", t))])) <= 1
     error_message = "All cni_node.instance_types must be the same architecture (all Graviton/arm64 or all x86_64)."
   }
@@ -444,9 +436,8 @@ variable "s3_csi" {
   nullable = false
 
   validation {
-    # The generated name interpolates var.tags["Owner"], which is a free-form map: a missing key is
-    # an opaque plan crash, and a value that is uppercase, spaced, or long produces an invalid
-    # bucket name at apply. bucket_name is the escape hatch.
+    # The generated name interpolates the free-form var.tags["Owner"]: a missing key crashes the
+    # plan, and an uppercase/spaced/long value fails at apply. bucket_name is the escape hatch.
     condition     = var.s3_csi.bucket_name != null || contains(keys(var.tags), "Owner")
     error_message = "s3_csi bucket naming requires either s3_csi.bucket_name, or an \"Owner\" key in var.tags. The generated name is \"<tags.Owner>-<name>-csi-bucket\" and must be a valid S3 bucket name: lowercase, [a-z0-9.-], 3-63 characters."
   }
@@ -457,18 +448,19 @@ variable "s3_csi" {
 }
 
 variable "vpc_endpoints" {
-  type = list(string)
-  # VPC endpoint service short-names to create (empty = none). "s3" and "dynamodb"
-  # are provisioned as free Gateway endpoints; every other name is an Interface
-  # endpoint. Each is opt-in, so e.g. ["s3"] creates only the S3 gateway. Interface
-  # endpoints let private nodes reach ECR/STS/SSM/EC2 and be SSM-debuggable without
-  # NAT egress (kubelet->API already works privately via the cluster's
-  # endpoint_private_access ENIs). Internal (module-created) VPC only.
-  # Cost: Gateway endpoints (s3/dynamodb) are free; Interface endpoints are ~$7/mo
-  # each per AZ (≈ $22/mo per service across 3 AZs) plus data processing.
-  # Recommended set for private/NAT-resilient clusters:
-  # ["s3","ssm","ssmmessages","ec2messages","ec2","ecr.api","ecr.dkr","sts","elasticloadbalancing","autoscaling"]
-  description = "VPC endpoint service short-names to create (empty = none). s3/dynamodb are free Gateway endpoints; others are Interface endpoints. See the variable comment for the recommended set and cost. Internal VPC only."
+  type        = list(string)
+  description = <<-EOT
+    VPC endpoint service short-names to create (empty = none). Interface endpoints let private nodes
+    reach ECR/STS/SSM/EC2 and be SSM-debuggable without NAT egress; kubelet->API already works
+    privately via the cluster's endpoint_private_access ENIs. Internal (module-created) VPC only.
+
+    COST: s3 and dynamodb are free Gateway endpoints. Every other name is an Interface endpoint at
+    ~$7/mo per AZ (about $22/mo per service across 3 AZs) plus data processing.
+
+    Recommended set for private/NAT-resilient clusters:
+    ["s3", "ssm", "ssmmessages", "ec2messages", "ec2", "ecr.api", "ecr.dkr", "sts",
+     "elasticloadbalancing", "autoscaling"]
+  EOT
   default     = []
 }
 
