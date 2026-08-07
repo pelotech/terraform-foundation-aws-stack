@@ -1,5 +1,25 @@
 # Changelog
 
+## [9.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v8.1.1...v9.0.0) (2026-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* EKS Pod Identity by default, with per-identity IRSA fallback ([#152](https://github.com/pelotech/terraform-foundation-aws-stack/issues/152))
+
+### Features
+
+* EKS Pod Identity by default, with per-identity IRSA fallback ([#152](https://github.com/pelotech/terraform-foundation-aws-stack/issues/152)) ([469c57d](https://github.com/pelotech/terraform-foundation-aws-stack/commit/469c57d896dfdacc53291e87966c0381fde2302a))
+
+
+### Chores
+
+* **deps:** update dependency aquasecurity/trivy to v0.73.0 ([#153](https://github.com/pelotech/terraform-foundation-aws-stack/issues/153)) ([947371b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/947371b22573557fecd1b2039638edcfc07343c1))
+* **deps:** update dependency minamijoyo/hcledit to v0.2.18 ([#156](https://github.com/pelotech/terraform-foundation-aws-stack/issues/156)) ([d924b8b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/d924b8b217a84716316664b070b3c69532672829))
+* **deps:** update dependency terraform-docs/terraform-docs to v0.24.0 ([#158](https://github.com/pelotech/terraform-foundation-aws-stack/issues/158)) ([ea6e0c0](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ea6e0c0e3706c3ba6afd7a05ba260ae8be5d58d9))
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.24.2 ([#154](https://github.com/pelotech/terraform-foundation-aws-stack/issues/154)) ([fd75fe3](https://github.com/pelotech/terraform-foundation-aws-stack/commit/fd75fe334155878a7ae0c1362b3017afc20e43ad))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.15.4 ([#155](https://github.com/pelotech/terraform-foundation-aws-stack/issues/155)) ([78f2736](https://github.com/pelotech/terraform-foundation-aws-stack/commit/78f2736e52efb38386f20810e5702a33a57825ce))
+
 ## [8.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v8.1.0...v8.1.1) (2026-08-01)
 
 
