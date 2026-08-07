@@ -12,4 +12,5 @@ metadata:
 spec:
   type: infrastructure
   lifecycle: production
-  owner: group:pelotech/leads
+  # Keep in sync with .github/CODEOWNERS.
+  owner: group:pelotech/foundation

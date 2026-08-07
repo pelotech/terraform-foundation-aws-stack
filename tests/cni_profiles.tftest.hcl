@@ -222,6 +222,88 @@ run "force_update_version_accepted" {
   }
 }
 
+################################################################################
+# CoreDNS tolerations
+#
+# The addon's stock tolerations already cover CriticalAddonsOnly, so a profile should only add
+# what its own taints require. These used to be a single blanket `{operator = "Exists"}`, which
+# tolerated everything — including the taint that keeps coredns off the recycled kube-ovn CNI node.
+################################################################################
+
+run "cilium_adds_no_coredns_tolerations" {
+  command = plan
+
+  assert {
+    condition     = length(output.coredns_tolerations_resolved) == 0
+    error_message = "cilium needs no extra coredns tolerations: CriticalAddonsOnly is stock, and cilium-operator clears node.cilium.io/agent-not-ready once the agent is ready"
+  }
+}
+
+run "vpc_cni_adds_no_coredns_tolerations" {
+  command = plan
+
+  variables {
+    cni = "vpc-cni"
+  }
+
+  assert {
+    condition     = length(output.coredns_tolerations_resolved) == 0
+    error_message = "vpc-cni's only taint is CriticalAddonsOnly, which the coredns addon already tolerates"
+  }
+}
+
+run "kube_ovn_tolerates_nidhogg_gates_only" {
+  command = plan
+
+  variables {
+    cni      = "kube-ovn"
+    cni_node = { kubernetes_version = "1.35" }
+  }
+
+  assert {
+    condition = (
+      length(output.coredns_tolerations_resolved) == 2 &&
+      contains([for t in output.coredns_tolerations_resolved : t.key], "nidhogg.uswitch.com/kube-system.kube-ovn-pinger") &&
+      contains([for t in output.coredns_tolerations_resolved : t.key], "nidhogg.uswitch.com/kube-system.kube-multus-ds")
+    )
+    error_message = "kube-ovn must tolerate exactly the two nidhogg gates so coredns is not deadlocked behind the multus/pinger DaemonSets"
+  }
+  # Pins the recycle-safety property the README's kube-ovn upgrade runbook depends on: the
+  # dedicated CNI node group is destroyed and recreated, and DNS survives only because coredns
+  # cannot schedule there. Previously guaranteed by nobody having noticed.
+  assert {
+    condition     = !contains([for t in output.coredns_tolerations_resolved : t.key], "kube-ovn.io/control-plane")
+    error_message = "coredns must NOT tolerate kube-ovn.io/control-plane, or it can land on the CNI node group that the kube-ovn recycle destroys"
+  }
+}
+
+run "coredns_configuration_values_override_still_wins" {
+  command = plan
+
+  variables {
+    cni      = "kube-ovn"
+    cni_node = { kubernetes_version = "1.35" }
+    addons = {
+      overrides = {
+        "coredns" = {
+          configuration_values = "{\"tolerations\":[{\"operator\":\"Exists\"}]}"
+        }
+      }
+    }
+  }
+
+  # The derived value is still what the profile says; the override is merged over the addon config
+  # in local.cluster_addons, so a consumer who needs the old blanket behavior can restore it.
+  assert {
+    condition     = length(output.coredns_tolerations_resolved) == 2
+    error_message = "an addons.overrides configuration_values must not change the profile-derived value"
+  }
+  assert {
+    condition     = output.cluster_addons_enabled_resolved["coredns"] == true
+    error_message = "overriding coredns configuration_values must not disable the addon"
+  }
+}
+
 run "vpc_endpoints_disabled_by_default" {
   command = plan
 

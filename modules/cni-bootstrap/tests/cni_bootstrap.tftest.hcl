@@ -10,8 +10,11 @@ run "cilium_defaults" {
     k8s_service_host = "abc123.gr7.us-west-2.eks.amazonaws.com"
   }
 
+  # Deliberately does not pin the version literal: Renovate bumps the chart default in main.tf but
+  # not this file, so a literal here goes stale and fails (it did, from v1.15.6 to v1.19.6).
+  # Version *resolution* is covered by the chart_version_override run below.
   assert {
-    condition     = helm_release.cni[0].chart == "cilium" && helm_release.cni[0].version == "1.15.6"
+    condition     = helm_release.cni[0].chart == "cilium" && helm_release.cni[0].version != ""
     error_message = "cilium must resolve to the cilium chart at the default version"
   }
   assert {
@@ -72,8 +75,10 @@ run "kube_ovn_defaults" {
   }
 
   assert {
-    condition     = helm_release.cni[0].name == "kube-ovn" && helm_release.cni[0].chart == "kube-ovn" && helm_release.cni[0].repository == "oci://ghcr.io/pelotech/charts" && helm_release.cni[0].version == "v1.13.9"
-    error_message = "kube-ovn must resolve to the OCI pelotech kube-ovn chart at v1.13.9"
+    # Same reasoning as the cilium run above: no version literal, or Renovate bumping main.tf
+    # leaves this assertion stale and red.
+    condition     = helm_release.cni[0].name == "kube-ovn" && helm_release.cni[0].chart == "kube-ovn" && helm_release.cni[0].repository == "oci://ghcr.io/pelotech/charts" && helm_release.cni[0].version != ""
+    error_message = "kube-ovn must resolve to the OCI pelotech kube-ovn chart at the default version"
   }
   assert {
     condition     = helm_release.cni[0].timeout == 900

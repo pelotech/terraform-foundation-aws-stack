@@ -128,7 +128,7 @@ variable "wait_for_nodes_selector" {
 variable "wait_for_nodes_count" {
   type        = number
   default     = 1
-  description = "Minimum number of registered nodes matching the selector before install proceeds. Default 1 matches the dedicated CNI node group's default size (foundation cni_node_size); set this to your CNI node group's size, or the poll hangs until wait_for_nodes_timeout and fails the apply."
+  description = "Minimum number of registered nodes matching the selector before install proceeds. Default 1 matches the dedicated CNI node group's default size; wire this to the foundation module's cni_node_size output, or the poll hangs until wait_for_nodes_timeout and fails the apply."
 }
 
 variable "wait_for_nodes_timeout" {

@@ -1,7 +1,18 @@
 site_name: terraform-foundation-aws-stack
 site_description: Terraform modules for bootstraping aws stack
+
+# docs_dir points at the repo root because the docs live alongside the code (README.md,
+# UPGRADING.md) rather than in a docs/ tree. Without this, mkdocs defaults to a docs/ directory
+# that does not exist here and the Backstage TechDocs build (catalog-info.yaml) fails.
+docs_dir: .
+
 nav:
   - Home: README.md
+  - Upgrading: UPGRADING.md
+
+exclude_docs: |
+  .terraform/
+  modules/*/.terraform/
 
 plugins:
   - techdocs-core
