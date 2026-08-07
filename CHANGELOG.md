@@ -1,5 +1,13 @@
 # Changelog
 
+## [9.0.2](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.0.1...v9.0.2) (2026-08-07)
+
+
+### Chores
+
+* **deps:** update dependency terraform-linters/tflint to v0.64.0 ([#160](https://github.com/pelotech/terraform-foundation-aws-stack/issues/160)) ([bcf5e79](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bcf5e79d501147c065ed884d41896411c22f96c4))
+* **deps:** update pre-commit hook adrienverge/yamllint to v1.38.0 ([#161](https://github.com/pelotech/terraform-foundation-aws-stack/issues/161)) ([a78b018](https://github.com/pelotech/terraform-foundation-aws-stack/commit/a78b01865c2bb4741fa436936edf76c5f8624c08))
+
 ## [9.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.0.0...v9.0.1) (2026-08-07)
 
 
