@@ -590,7 +590,7 @@ module "ebs_csi_driver_irsa_role" {
 
 module "s3_csi" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "5.15.3"
+  version = "5.15.4"
   # var.s3_csi validates that bucket_name is set or tags has an Owner key, so this cannot crash.
   bucket = coalesce(var.s3_csi.bucket_name, "${try(var.tags.Owner, "")}-${var.name}-csi-bucket")
 
