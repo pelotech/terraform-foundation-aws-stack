@@ -32,7 +32,7 @@ jobs:
       - name: install hcledit
         env:
           # renovate: datasource=github-releases depName=minamijoyo/hcledit
-          HCLEDIT_VERSION: 0.2.10
+          HCLEDIT_VERSION: 0.2.18
         run: |
           set -euo pipefail
           tmpdir=$(mktemp -d)
