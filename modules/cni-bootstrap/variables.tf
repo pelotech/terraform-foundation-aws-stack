@@ -139,14 +139,21 @@ variable "wait_for_nodes_timeout" {
 
 variable "custom_chart" {
   type = object({
-    repository = string
-    chart      = string
-    version    = string
+    repository   = string
+    chart        = string
+    version      = string
+    release_name = optional(string)
   })
   default     = null
-  description = "Chart coordinates for cni=custom. Required when cni=custom, ignored otherwise."
+  description = "Chart coordinates for cni=custom. Required when cni=custom, ignored otherwise. release_name names the Helm release independently of the chart (needed when the chart name is not a usable release name, or to install under a name an existing release already uses); omit it to inherit chart. Changing it on an existing release replaces it — Helm sees a new release and the old one is uninstalled, so the CNI is torn down and reinstalled."
   validation {
     condition     = var.cni != "custom" || var.custom_chart != null
     error_message = "custom_chart is required when cni=custom."
+  }
+  # An empty string would reach helm_release.name and fail at apply with an opaque
+  # Helm error; reject it here where the message can point at the input.
+  validation {
+    condition     = try(var.custom_chart.release_name, null) != ""
+    error_message = "custom_chart.release_name must be non-empty when set. Omit it to inherit custom_chart.chart."
   }
 }

@@ -53,7 +53,9 @@ locals {
       )
     }
     custom = {
-      release_name  = try(var.custom_chart.chart, null)
+      # Release name is decoupled from the chart name: optional release_name wins,
+      # chart is the fallback. try() covers custom_chart = null (cni != custom).
+      release_name  = try(coalesce(var.custom_chart.release_name, var.custom_chart.chart), null)
       repository    = try(var.custom_chart.repository, null)
       chart         = try(var.custom_chart.chart, null)
       version       = try(var.custom_chart.version, null)
@@ -111,8 +113,7 @@ resource "terraform_data" "wait_nodes" {
 }
 
 resource "helm_release" "cni" {
-  count = var.create ? 1 : 0
-
+  count      = var.create ? 1 : 0
   name       = local.selected.release_name
   repository = local.selected.repository
   chart      = local.selected.chart

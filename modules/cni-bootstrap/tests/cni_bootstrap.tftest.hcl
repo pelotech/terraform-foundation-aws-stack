@@ -206,6 +206,52 @@ run "custom_chart" {
     condition     = helm_release.cni[0].chart == "my-cni" && helm_release.cni[0].version == "0.1.0" && helm_release.cni[0].repository == "https://example.com/charts"
     error_message = "custom must use the custom_chart coordinates"
   }
+
+  assert {
+    condition     = helm_release.cni[0].name == "my-cni"
+    error_message = "release name must fall back to the chart name when release_name is omitted"
+  }
+}
+
+run "custom_chart_release_name" {
+  command = plan
+
+  variables {
+    cni = "custom"
+    custom_chart = {
+      repository   = "https://example.com/charts"
+      chart        = "my-cni"
+      version      = "0.1.0"
+      release_name = "cni"
+    }
+  }
+
+  assert {
+    condition     = helm_release.cni[0].name == "cni"
+    error_message = "release_name must override the chart-derived release name"
+  }
+
+  # The rest of the coordinates must be untouched by naming the release.
+  assert {
+    condition     = helm_release.cni[0].chart == "my-cni"
+    error_message = "release_name must not change which chart is installed"
+  }
+}
+
+run "custom_chart_rejects_empty_release_name" {
+  command = plan
+
+  variables {
+    cni = "custom"
+    custom_chart = {
+      repository   = "https://example.com/charts"
+      chart        = "my-cni"
+      version      = "0.1.0"
+      release_name = ""
+    }
+  }
+
+  expect_failures = [var.custom_chart]
 }
 
 run "custom_requires_chart" {

@@ -78,7 +78,8 @@ state:
 terraform import 'module.cni_bootstrap.helm_release.cni[0]' <namespace>/<release>
 ```
 
-Release names: `cilium`, `kube-ovn`, or your custom chart's name; the namespace
+Release names: `cilium`, `kube-ovn`, or for `custom` your `custom_chart.release_name`
+(falling back to `custom_chart.chart`); the namespace
 is `var.namespace` (default `kube-system`) — e.g.
 `terraform import 'module.cni_bootstrap.helm_release.cni[0]' kube-system/kube-ovn`.
 
@@ -107,6 +108,8 @@ module "cni_bootstrap" {
     repository = "https://example.com/charts"
     chart      = "my-cni"
     version    = "1.2.3"
+    # Optional. Names the Helm release; omit to inherit the chart name ("my-cni").
+    release_name = "cni"
   }
   helm_set = [{ name = "some.value", value = "true" }]
 }
@@ -115,6 +118,12 @@ module "cni_bootstrap" {
 A custom CNI installs concurrently by default. If it also needs registered nodes
 first, set `wait_for_nodes = true` with a `wait_for_nodes_selector` (and
 `cluster_name`/`region`) to use the same poll kube-ovn uses.
+
+`release_name` decouples the release from the chart name — useful when the chart
+name is not the name you want the release to carry, or when a release under the
+chart's name already exists. Changing it on a live release is a **replace**, not a
+rename: Helm installs the new name and uninstalls the old one, so the CNI is torn
+down and reinstalled. Pick the name at install time.
 
 ### kube-ovn
 
@@ -176,7 +185,7 @@ No modules.
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | EKS cluster name (from the foundation eks\_cluster\_name output). Required when wait\_for\_nodes is enabled (kube-ovn default) so the node-registration poll can reach the cluster. | `string` | `""` | no |
 | <a name="input_cni"></a> [cni](#input\_cni) | Which CNI to install. One of: cilium, kube-ovn, custom. Use custom with custom\_chart to install any Helm-packaged CNI. | `string` | `"cilium"` | no |
 | <a name="input_create"></a> [create](#input\_create) | Whether to install the CNI Helm release. | `bool` | `true` | no |
-| <a name="input_custom_chart"></a> [custom\_chart](#input\_custom\_chart) | Chart coordinates for cni=custom. Required when cni=custom, ignored otherwise. | <pre>object({<br/>    repository = string<br/>    chart      = string<br/>    version    = string<br/>  })</pre> | `null` | no |
+| <a name="input_custom_chart"></a> [custom\_chart](#input\_custom\_chart) | Chart coordinates for cni=custom. Required when cni=custom, ignored otherwise. release\_name names the Helm release independently of the chart (needed when the chart name is not a usable release name, or to install under a name an existing release already uses); omit it to inherit chart. Changing it on an existing release replaces it — Helm sees a new release and the old one is uninstalled, so the CNI is torn down and reinstalled. | <pre>object({<br/>    repository   = string<br/>    chart        = string<br/>    version      = string<br/>    release_name = optional(string)<br/>  })</pre> | `null` | no |
 | <a name="input_helm_set"></a> [helm\_set](#input\_helm\_set) | Extra Helm --set values merged over the CNI defaults (caller entries take effect after the defaults). | `list(object({ name = string, value = string }))` | `[]` | no |
 | <a name="input_helm_values"></a> [helm\_values](#input\_helm\_values) | Extra raw Helm values YAML documents (like -f), applied in order. | `list(string)` | `[]` | no |
 | <a name="input_k8s_service_host"></a> [k8s\_service\_host](#input\_k8s\_service\_host) | API server host (no scheme) for Cilium kube-proxy replacement bootstrap. Wire from the foundation module's cilium\_k8s\_service\_host output. Ignored unless cni=cilium and kube\_proxy\_replacement=true. | `string` | `""` | no |
