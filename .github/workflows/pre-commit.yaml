@@ -8,6 +8,14 @@ on:
       - main
 permissions:
   contents: read
+
+# One run per PR branch: a new push supersedes the in-flight run. head_ref is only set on
+# pull_request, so ref keeps push runs in their own group. Pushes to main are never cancelled —
+# each merge commit keeps its own completed run rather than being killed by the next merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
