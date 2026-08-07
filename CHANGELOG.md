@@ -1,5 +1,17 @@
 # Changelog
 
+## [9.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.0.0...v9.0.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* add the ability to set the release_name for the custom chart ([2a5b19f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2a5b19f1d8c8812fde8d09e667a96060894b83c2))
+
+
+### Chores
+
+* cancel in progress pre-commit for PRs ([8faa801](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8faa801781be39a0cf9bc3e19ffd4bbf9729b0d5))
+
 ## [9.0.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v8.1.1...v9.0.0) (2026-08-07)
 
 
