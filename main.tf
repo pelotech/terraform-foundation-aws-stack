@@ -441,7 +441,7 @@ module "vpc_endpoints" {
 
 module "eks" {
   source                        = "terraform-aws-modules/eks/aws"
-  version                       = "21.24.1"
+  version                       = "21.24.2"
   name                          = var.name
   kubernetes_version            = var.cluster_version
   create                        = var.create
@@ -525,7 +525,7 @@ data "aws_iam_policy_document" "source" {
 module "karpenter" {
   count                           = var.create ? 1 : 0
   source                          = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version                         = "21.24.1"
+  version                         = "21.24.2"
   enable_inline_policy            = true
   cluster_name                    = module.eks.cluster_name
   queue_name                      = var.name
