@@ -2,8 +2,9 @@
 
 Installs a Kubernetes CNI via Helm as part of `terraform apply`, so a CNI-less
 EKS cluster's nodes reach `Ready` without the ~60m `aws_eks_node_group` hang.
-Ships built-in defaults for **cilium** and **kube-ovn**, plus a **custom** option
-for any Helm-packaged CNI.
+Ships built-in defaults for **cilium**, **kube-ovn** (legacy v1 chart) and
+**kube-ovn-v2** (upstream v2 chart), plus a **custom** option for any
+Helm-packaged CNI.
 
 Because this module depends only on the cluster (not the node group), Terraform
 provisions it concurrently with the node group. For **cilium** the `helm_release`
@@ -78,8 +79,8 @@ state:
 terraform import 'module.cni_bootstrap.helm_release.cni[0]' <namespace>/<release>
 ```
 
-Release names: `cilium`, `kube-ovn`, or for `custom` your `custom_chart.release_name`
-(falling back to `custom_chart.chart`); the namespace
+Release names: `cilium`, `kube-ovn` (both kube-ovn variants), or for `custom` your
+`custom_chart.release_name` (falling back to `custom_chart.chart`); the namespace
 is `var.namespace` (default `kube-system`) — e.g.
 `terraform import 'module.cni_bootstrap.helm_release.cni[0]' kube-system/kube-ovn`.
 
@@ -139,14 +140,44 @@ module "cni_bootstrap" {
 
 > Installs the OCI chart `oci://ghcr.io/pelotech/charts/kube-ovn` at the version pinned in
 > `main.tf` (release name `kube-ovn`, 15m/900s default timeout) with pinger/resource
-> defaults baked in. **`ipv4.SVC_CIDR` comes from `service_cidr`** — wire the
+> defaults baked in (rendered from `values/kube-ovn.yaml.tftpl`).
+> **`ipv4.SVC_CIDR` comes from `service_cidr`** — wire the
 > foundation `eks_cluster_service_cidr` output so it matches the cluster's actual
-> service CIDR (set `service_cidr = ""` to omit it). Before installing, it waits
+> service CIDR. Before installing, it waits
 > for the `kube-ovn/role=master` node (set by `cni = "kube-ovn"`) to
 > register — hence the required `cluster_name`/`region` and the `aws`+`kubectl`
 > dependency. `helm`'s `--force-conflicts` (used on in-place kube-ovn upgrades)
 > has no Terraform provider equivalent; it's a no-op on the initial bootstrap
 > install this module targets.
+
+### kube-ovn-v2
+
+```hcl
+module "cni_bootstrap" {
+  source       = "github.com/pelotech/terraform-foundation-aws-stack//modules/cni-bootstrap"
+  cni          = "kube-ovn-v2"
+  cluster_name = module.foundation.eks_cluster_name         # for the node poll
+  region       = module.foundation.region                   # region-qualifies the cluster
+  service_cidr = module.foundation.eks_cluster_service_cidr # -> networking.services.cidr.v4
+}
+```
+
+> Installs the upstream OCI chart `oci://ghcr.io/kubeovn/charts/kube-ovn-v2` at the
+> version pinned in `main.tf`, under the same release name (`kube-ovn`) and
+> node-registration gate as the v1 variant. Defaults render from
+> `values/kube-ovn-v2.yaml.tftpl`: **`networking.services.cidr.v4` from
+> `service_cidr`**, pinger targets, and — derived from the wait selector
+> (`kube-ovn/role=master` by default) — `masterNodesLabels` plus a
+> `controller.nodeAffinity` that **pins `kube-ovn-controller` onto the dedicated
+> CNI node**, alongside `ovn-central` (pinned there by the chart via
+> `masterNodesLabels`). The chart's structured values differ from v1's env-style
+> keys, so `helm_set`/`helm_values` overrides do not carry over between variants.
+>
+> Migrating a cluster that already runs the kube-ovn-v2 chart via `cni = "custom"`:
+> switch to `cni = "kube-ovn-v2"` and drop the `custom_chart` block — same release
+> name and chart, so the apply is an in-place `helm upgrade`. Compare your
+> `helm_set`/`helm_values` against the new module defaults first and drop what is
+> now covered (e.g. the controller node-affinity pin and service CIDR).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -182,21 +213,21 @@ No modules.
 | <a name="input_bootstrap_generation"></a> [bootstrap\_generation](#input\_bootstrap\_generation) | Bump this to force a re-bootstrap: re-runs the node-registration poll and re-applies the CNI helm release against the current nodes. Used during a node recycle/upgrade (e.g. kube-ovn) so the chart re-reads the new master node IPs. Bump it in the RE-ENABLE apply, after the old master node group is destroyed — bumping while the old master is still registered binds the stale node and re-applies the old IP (a no-op). Empty (default) = no forced re-apply. | `string` | `""` | no |
 | <a name="input_chart_version"></a> [chart\_version](#input\_chart\_version) | Override the CNI Helm chart version. null uses the built-in default for the selected cni (ignored for custom, which uses custom\_chart.version). | `string` | `null` | no |
 | <a name="input_cleanup_on_fail"></a> [cleanup\_on\_fail](#input\_cleanup\_on\_fail) | Delete new resources created during a failed upgrade (helm --cleanup-on-fail). | `bool` | `true` | no |
-| <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | EKS cluster name (from the foundation eks\_cluster\_name output). Required when wait\_for\_nodes is enabled (kube-ovn default) so the node-registration poll can reach the cluster. | `string` | `""` | no |
-| <a name="input_cni"></a> [cni](#input\_cni) | Which CNI to install. One of: cilium, kube-ovn, custom. Use custom with custom\_chart to install any Helm-packaged CNI. | `string` | `"cilium"` | no |
+| <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | EKS cluster name (from the foundation eks\_cluster\_name output). Required when wait\_for\_nodes is enabled (kube-ovn/kube-ovn-v2 default) so the node-registration poll can reach the cluster. | `string` | `""` | no |
+| <a name="input_cni"></a> [cni](#input\_cni) | Which CNI to install. One of: cilium, kube-ovn (legacy v1 chart), kube-ovn-v2 (upstream kube-ovn-v2 chart), custom. Use custom with custom\_chart to install any Helm-packaged CNI. | `string` | `"cilium"` | no |
 | <a name="input_create"></a> [create](#input\_create) | Whether to install the CNI Helm release. | `bool` | `true` | no |
 | <a name="input_custom_chart"></a> [custom\_chart](#input\_custom\_chart) | Chart coordinates for cni=custom. Required when cni=custom, ignored otherwise. release\_name names the Helm release independently of the chart (needed when the chart name is not a usable release name, or to install under a name an existing release already uses); omit it to inherit chart. Changing it on an existing release replaces it — Helm sees a new release and the old one is uninstalled, so the CNI is torn down and reinstalled. | <pre>object({<br/>    repository   = string<br/>    chart        = string<br/>    version      = string<br/>    release_name = optional(string)<br/>  })</pre> | `null` | no |
 | <a name="input_helm_set"></a> [helm\_set](#input\_helm\_set) | Extra Helm --set values merged over the CNI defaults (caller entries take effect after the defaults). | `list(object({ name = string, value = string }))` | `[]` | no |
-| <a name="input_helm_values"></a> [helm\_values](#input\_helm\_values) | Extra raw Helm values YAML documents (like -f), applied in order. | `list(string)` | `[]` | no |
+| <a name="input_helm_values"></a> [helm\_values](#input\_helm\_values) | Extra raw Helm values YAML documents (like -f), applied in order after the module's per-CNI default values documents (so caller documents win on conflicts). | `list(string)` | `[]` | no |
 | <a name="input_k8s_service_host"></a> [k8s\_service\_host](#input\_k8s\_service\_host) | API server host (no scheme) for Cilium kube-proxy replacement bootstrap. Wire from the foundation module's cilium\_k8s\_service\_host output. Ignored unless cni=cilium and kube\_proxy\_replacement=true. | `string` | `""` | no |
 | <a name="input_kube_proxy_replacement"></a> [kube\_proxy\_replacement](#input\_kube\_proxy\_replacement) | Enable Cilium kube-proxy replacement (cni=cilium only). When true, k8sServiceHost/k8sServicePort are set from k8s\_service\_host. | `bool` | `true` | no |
 | <a name="input_namespace"></a> [namespace](#input\_namespace) | Namespace to install the CNI release into. | `string` | `"kube-system"` | no |
 | <a name="input_region"></a> [region](#input\_region) | AWS region of the cluster (from the foundation region output). Required when wait\_for\_nodes is enabled — the same cluster name can exist in multiple regions, so the poll must region-qualify it. | `string` | `""` | no |
 | <a name="input_replace"></a> [replace](#input\_replace) | Reuse a release name whose existing release is failed/pending/deleted-in-history (helm install --replace) — lets a repair reclaim a stuck name without a manual `helm uninstall`. Does NOT adopt a healthy deployed release (use `terraform import`). Marked unsafe for production by Helm. | `bool` | `false` | no |
-| <a name="input_service_cidr"></a> [service\_cidr](#input\_service\_cidr) | Kubernetes service CIDR for kube-ovn (ipv4.SVC\_CIDR). Required for kube-ovn — wire from the foundation module's eks\_cluster\_service\_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom. | `string` | `""` | no |
-| <a name="input_wait_for_nodes"></a> [wait\_for\_nodes](#input\_wait\_for\_nodes) | Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster\_name + region. | `bool` | `null` | no |
+| <a name="input_service_cidr"></a> [service\_cidr](#input\_service\_cidr) | Kubernetes service CIDR for kube-ovn (ipv4.SVC\_CIDR on the v1 chart, networking.services.cidr.v4 on kube-ovn-v2). Required for kube-ovn/kube-ovn-v2 — wire from the foundation module's eks\_cluster\_service\_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom. | `string` | `""` | no |
+| <a name="input_wait_for_nodes"></a> [wait\_for\_nodes](#input\_wait\_for\_nodes) | Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn/kube-ovn-v2 true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster\_name + region. | `bool` | `null` | no |
 | <a name="input_wait_for_nodes_count"></a> [wait\_for\_nodes\_count](#input\_wait\_for\_nodes\_count) | Minimum number of registered nodes matching the selector before install proceeds. Default 1 matches the dedicated CNI node group's default size; wire this to the foundation module's cni\_node\_size output, or the poll hangs until wait\_for\_nodes\_timeout and fails the apply. | `number` | `1` | no |
-| <a name="input_wait_for_nodes_selector"></a> [wait\_for\_nodes\_selector](#input\_wait\_for\_nodes\_selector) | Label selector the node-registration poll waits on. null derives per-CNI (kube-ovn "kube-ovn/role=master"; otherwise empty = any node). | `string` | `null` | no |
+| <a name="input_wait_for_nodes_selector"></a> [wait\_for\_nodes\_selector](#input\_wait\_for\_nodes\_selector) | Label selector the node-registration poll waits on. null derives per-CNI (kube-ovn/kube-ovn-v2 "kube-ovn/role=master"; otherwise empty = any node). For the kube-ovn variants it also drives the master-node label the charts pin the CNI control plane to (MASTER\_NODES\_LABEL on v1; masterNodesLabels + the kube-ovn-controller node affinity on v2, where it must be a single key=value). | `string` | `null` | no |
 | <a name="input_wait_for_nodes_timeout"></a> [wait\_for\_nodes\_timeout](#input\_wait\_for\_nodes\_timeout) | Seconds the node-registration poll waits before failing. | `number` | `600` | no |
 | <a name="input_wait_timeout"></a> [wait\_timeout](#input\_wait\_timeout) | Seconds to wait for the Helm release to become ready. null derives per-CNI (cilium/custom 600s, kube-ovn 900s/15m). | `number` | `null` | no |
 
@@ -207,5 +238,6 @@ No modules.
 | <a name="output_namespace"></a> [namespace](#output\_namespace) | Namespace the CNI release was installed into. |
 | <a name="output_release_name"></a> [release\_name](#output\_release\_name) | Name of the installed CNI Helm release (null when create=false). |
 | <a name="output_resolved_set"></a> [resolved\_set](#output\_resolved\_set) | Effective Helm --set values (CNI defaults merged with helm\_set). |
+| <a name="output_resolved_values"></a> [resolved\_values](#output\_resolved\_values) | Effective Helm values documents (per-CNI default values followed by helm\_values). |
 | <a name="output_resolved_version"></a> [resolved\_version](#output\_resolved\_version) | Chart version selected after applying cni defaults and chart\_version override. |
 <!-- END_TF_DOCS -->

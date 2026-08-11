@@ -1,0 +1,26 @@
+# cni-bootstrap defaults for the kube-ovn (v1) chart. Override per-key via
+# helm_set or with later helm_values documents.
+MASTER_NODES_LABEL: "${master_nodes_label}"
+ipv4:
+%{ if service_cidr != "" ~}
+  SVC_CIDR: "${service_cidr}"
+%{ endif ~}
+  PINGER_EXTERNAL_ADDRESS: "8.8.8.8"
+  PINGER_EXTERNAL_DOMAIN: "google.com."
+func:
+  ENABLE_KEEP_VM_IP: false
+kube-ovn-controller:
+  requests:
+    memory: "512Mi"
+  limits:
+    memory: "512Mi"
+ovs-ovn:
+  requests:
+    memory: "512Mi"
+  limits:
+    memory: "512Mi"
+pinger:
+  requests:
+    memory: "300Mi"
+  limits:
+    memory: "300Mi"

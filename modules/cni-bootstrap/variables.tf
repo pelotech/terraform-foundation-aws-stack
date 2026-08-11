@@ -7,10 +7,10 @@ variable "create" {
 variable "cni" {
   type        = string
   default     = "cilium"
-  description = "Which CNI to install. One of: cilium, kube-ovn, custom. Use custom with custom_chart to install any Helm-packaged CNI."
+  description = "Which CNI to install. One of: cilium, kube-ovn (legacy v1 chart), kube-ovn-v2 (upstream kube-ovn-v2 chart), custom. Use custom with custom_chart to install any Helm-packaged CNI."
   validation {
-    condition     = contains(["cilium", "kube-ovn", "custom"], var.cni)
-    error_message = "cni must be one of: cilium, kube-ovn, custom."
+    condition     = contains(["cilium", "kube-ovn", "kube-ovn-v2", "custom"], var.cni)
+    error_message = "cni must be one of: cilium, kube-ovn, kube-ovn-v2, custom."
   }
 }
 
@@ -23,13 +23,14 @@ variable "namespace" {
 variable "cluster_name" {
   type        = string
   default     = ""
-  description = "EKS cluster name (from the foundation eks_cluster_name output). Required when wait_for_nodes is enabled (kube-ovn default) so the node-registration poll can reach the cluster."
+  description = "EKS cluster name (from the foundation eks_cluster_name output). Required when wait_for_nodes is enabled (kube-ovn/kube-ovn-v2 default) so the node-registration poll can reach the cluster."
   # NOTE: cluster_name and region repeat this "is waiting effectively on?" check
-  # (`wait_for_nodes ?? cni == kube-ovn`). Variable validation can't reference the
-  # local that computes it, so the expression is duplicated here and in `region`.
+  # (`wait_for_nodes ?? cni is a kube-ovn variant`). Variable validation can't
+  # reference the local that computes it, so the expression is duplicated here
+  # and in `region`.
   validation {
-    condition     = !(var.wait_for_nodes == null ? var.cni == "kube-ovn" : var.wait_for_nodes) || var.cluster_name != ""
-    error_message = "cluster_name is required when waiting for node registration (default for kube-ovn). Wire module.foundation.eks_cluster_name."
+    condition     = !(var.wait_for_nodes == null ? contains(["kube-ovn", "kube-ovn-v2"], var.cni) : var.wait_for_nodes) || var.cluster_name != ""
+    error_message = "cluster_name is required when waiting for node registration (default for kube-ovn/kube-ovn-v2). Wire module.foundation.eks_cluster_name."
   }
 }
 
@@ -38,8 +39,8 @@ variable "region" {
   default     = ""
   description = "AWS region of the cluster (from the foundation region output). Required when wait_for_nodes is enabled — the same cluster name can exist in multiple regions, so the poll must region-qualify it."
   validation {
-    condition     = !(var.wait_for_nodes == null ? var.cni == "kube-ovn" : var.wait_for_nodes) || var.region != ""
-    error_message = "region is required when waiting for node registration (default for kube-ovn). Wire module.foundation.region."
+    condition     = !(var.wait_for_nodes == null ? contains(["kube-ovn", "kube-ovn-v2"], var.cni) : var.wait_for_nodes) || var.region != ""
+    error_message = "region is required when waiting for node registration (default for kube-ovn/kube-ovn-v2). Wire module.foundation.region."
   }
 }
 
@@ -52,10 +53,10 @@ variable "k8s_service_host" {
 variable "service_cidr" {
   type        = string
   default     = ""
-  description = "Kubernetes service CIDR for kube-ovn (ipv4.SVC_CIDR). Required for kube-ovn — wire from the foundation module's eks_cluster_service_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom."
+  description = "Kubernetes service CIDR for kube-ovn (ipv4.SVC_CIDR on the v1 chart, networking.services.cidr.v4 on kube-ovn-v2). Required for kube-ovn/kube-ovn-v2 — wire from the foundation module's eks_cluster_service_cidr output so it matches the cluster (a wrong CIDR silently breaks kube-ovn). Ignored for cilium/custom."
   validation {
-    condition     = var.cni != "kube-ovn" || var.service_cidr != ""
-    error_message = "service_cidr is required for kube-ovn. Wire module.foundation.eks_cluster_service_cidr."
+    condition     = !contains(["kube-ovn", "kube-ovn-v2"], var.cni) || var.service_cidr != ""
+    error_message = "service_cidr is required for kube-ovn/kube-ovn-v2. Wire module.foundation.eks_cluster_service_cidr."
   }
 }
 
@@ -80,7 +81,7 @@ variable "helm_set" {
 variable "helm_values" {
   type        = list(string)
   default     = []
-  description = "Extra raw Helm values YAML documents (like -f), applied in order."
+  description = "Extra raw Helm values YAML documents (like -f), applied in order after the module's per-CNI default values documents (so caller documents win on conflicts)."
 }
 
 variable "wait_timeout" {
@@ -116,13 +117,13 @@ variable "bootstrap_generation" {
 variable "wait_for_nodes" {
   type        = bool
   default     = null
-  description = "Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster_name + region."
+  description = "Poll the cluster and wait for nodes to register before installing (needed by kube-ovn, which reads node IPs). null derives per-CNI (kube-ovn/kube-ovn-v2 true; cilium/custom false = install concurrently/immediately). Set true for a custom CNI that also needs registered nodes. Requires cluster_name + region."
 }
 
 variable "wait_for_nodes_selector" {
   type        = string
   default     = null
-  description = "Label selector the node-registration poll waits on. null derives per-CNI (kube-ovn \"kube-ovn/role=master\"; otherwise empty = any node)."
+  description = "Label selector the node-registration poll waits on. null derives per-CNI (kube-ovn/kube-ovn-v2 \"kube-ovn/role=master\"; otherwise empty = any node). For the kube-ovn variants it also drives the master-node label the charts pin the CNI control plane to (MASTER_NODES_LABEL on v1; masterNodesLabels + the kube-ovn-controller node affinity on v2, where it must be a single key=value)."
 }
 
 variable "wait_for_nodes_count" {

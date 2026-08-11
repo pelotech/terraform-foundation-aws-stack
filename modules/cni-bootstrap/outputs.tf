@@ -17,3 +17,8 @@ output "resolved_set" {
   description = "Effective Helm --set values (CNI defaults merged with helm_set)."
   value       = local.set
 }
+
+output "resolved_values" {
+  description = "Effective Helm values documents (per-CNI default values followed by helm_values)."
+  value       = local.values
+}
