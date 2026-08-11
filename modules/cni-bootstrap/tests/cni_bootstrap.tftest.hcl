@@ -85,12 +85,12 @@ run "kube_ovn_defaults" {
     error_message = "kube-ovn must default to the 15m (900s) timeout"
   }
   assert {
-    condition     = anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR" && s.value == "10.100.0.0/16"])
-    error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr"
+    condition     = yamldecode(output.resolved_values[0]).ipv4.SVC_CIDR == "10.100.0.0/16"
+    error_message = "kube-ovn must set ipv4.SVC_CIDR from service_cidr in its default values document"
   }
   assert {
-    condition     = anytrue([for s in output.resolved_set : s.name == "MASTER_NODES_LABEL" && s.value == "kube-ovn/role=master"])
-    error_message = "kube-ovn must set MASTER_NODES_LABEL from the node selector"
+    condition     = yamldecode(output.resolved_values[0]).MASTER_NODES_LABEL == "kube-ovn/role=master"
+    error_message = "kube-ovn must set MASTER_NODES_LABEL from the node selector in its default values document"
   }
   assert {
     condition     = length(terraform_data.wait_nodes) == 1
@@ -109,9 +109,142 @@ run "kube_ovn_service_cidr_override" {
   }
 
   assert {
-    condition     = anytrue([for s in output.resolved_set : s.name == "ipv4.SVC_CIDR" && s.value == "172.20.0.0/16"])
+    condition     = yamldecode(output.resolved_values[0]).ipv4.SVC_CIDR == "172.20.0.0/16"
     error_message = "service_cidr must drive ipv4.SVC_CIDR"
   }
+}
+
+run "kube_ovn_v2_defaults" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn-v2"
+    cluster_name = "test"
+    region       = "us-west-2"
+    service_cidr = "10.100.0.0/16"
+  }
+
+  # No version literal (Renovate bumps main.tf only) — same reasoning as the other runs.
+  assert {
+    condition     = helm_release.cni[0].name == "kube-ovn" && helm_release.cni[0].chart == "kube-ovn-v2" && helm_release.cni[0].repository == "oci://ghcr.io/kubeovn/charts" && helm_release.cni[0].version != ""
+    error_message = "kube-ovn-v2 must resolve to the upstream OCI kube-ovn-v2 chart under the kube-ovn release name"
+  }
+  assert {
+    condition     = helm_release.cni[0].timeout == 900
+    error_message = "kube-ovn-v2 must default to the 15m (900s) timeout"
+  }
+  assert {
+    condition     = yamldecode(output.resolved_values[0]).networking.services.cidr.v4 == "10.100.0.0/16"
+    error_message = "kube-ovn-v2 must set networking.services.cidr.v4 from service_cidr"
+  }
+  assert {
+    condition     = yamldecode(output.resolved_values[0]).masterNodesLabels["kube-ovn/role"] == "master"
+    error_message = "kube-ovn-v2 must derive masterNodesLabels from the node selector"
+  }
+  # The pin moved into the module from the ot-dev call site: kube-ovn-controller
+  # must land on the dedicated CNI node alongside ovn-central.
+  assert {
+    condition = yamldecode(output.resolved_values[0]).controller.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].matchExpressions[0] == {
+      key      = "kube-ovn/role"
+      operator = "In"
+      values   = ["master"]
+    }
+    error_message = "kube-ovn-v2 must pin kube-ovn-controller to the master-labeled CNI node"
+  }
+  assert {
+    condition     = length(terraform_data.wait_nodes) == 1
+    error_message = "kube-ovn-v2 must gate the install on node registration"
+  }
+}
+
+run "kube_ovn_v2_selector_override_drives_master_label" {
+  command = plan
+
+  variables {
+    cni                     = "kube-ovn-v2"
+    cluster_name            = "test"
+    region                  = "us-west-2"
+    service_cidr            = "10.100.0.0/16"
+    wait_for_nodes_selector = "cni/dedicated=true"
+  }
+
+  assert {
+    condition     = yamldecode(output.resolved_values[0]).masterNodesLabels["cni/dedicated"] == "true"
+    error_message = "an overridden selector must drive masterNodesLabels"
+  }
+  assert {
+    condition = yamldecode(output.resolved_values[0]).controller.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].matchExpressions[0] == {
+      key      = "cni/dedicated"
+      operator = "In"
+      values   = ["true"]
+    }
+    error_message = "an overridden selector must drive the controller node affinity"
+  }
+}
+
+run "kube_ovn_v2_non_kv_selector_falls_back_to_chart_defaults" {
+  command = plan
+
+  variables {
+    cni                     = "kube-ovn-v2"
+    cluster_name            = "test"
+    region                  = "us-west-2"
+    service_cidr            = "10.100.0.0/16"
+    wait_for_nodes_selector = "a=b,c=d"
+  }
+
+  # A selector that isn't a single key=value can't map to a label — the values
+  # document must omit masterNodesLabels/controller so the chart defaults apply.
+  assert {
+    condition     = !can(yamldecode(output.resolved_values[0]).masterNodesLabels)
+    error_message = "a non key=value selector must not render masterNodesLabels"
+  }
+  assert {
+    condition     = !can(yamldecode(output.resolved_values[0]).controller)
+    error_message = "a non key=value selector must not render the controller affinity"
+  }
+}
+
+run "kube_ovn_v2_caller_values_append_after_defaults" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn-v2"
+    cluster_name = "test"
+    region       = "us-west-2"
+    service_cidr = "10.100.0.0/16"
+    helm_values  = ["controller:\n  metrics:\n    port: 12345\n"]
+  }
+
+  assert {
+    condition     = length(output.resolved_values) == 2 && yamldecode(output.resolved_values[1]).controller.metrics.port == 12345
+    error_message = "caller helm_values must append after the module's default values document (so they win on merge)"
+  }
+}
+
+run "kube_ovn_v2_requires_service_cidr" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn-v2"
+    cluster_name = "test"
+    region       = "us-west-2"
+    service_cidr = ""
+  }
+
+  expect_failures = [var.service_cidr]
+}
+
+run "kube_ovn_v2_requires_cluster_name" {
+  command = plan
+
+  variables {
+    cni          = "kube-ovn-v2"
+    region       = "us-west-2"
+    service_cidr = "10.100.0.0/16"
+  }
+
+  expect_failures = [var.cluster_name]
 }
 
 run "kube_ovn_requires_service_cidr" {
