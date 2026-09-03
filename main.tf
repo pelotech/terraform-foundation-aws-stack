@@ -549,7 +549,7 @@ module "karpenter" {
 module "load_balancer_controller_irsa_role" {
   count   = local.irsa_enabled["load_balancer_controller"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.8.0"
+  version = "6.8.1"
 
   use_name_prefix = false
   name            = "${var.name}-alb-role"
@@ -570,7 +570,7 @@ module "load_balancer_controller_irsa_role" {
 module "ebs_csi_driver_irsa_role" {
   count   = local.irsa_enabled["ebs_csi_driver"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.8.0"
+  version = "6.8.1"
 
   use_name_prefix = false
   name            = "${var.name}-ebs-csi-driver-role"
@@ -613,7 +613,7 @@ module "s3_csi" {
 module "s3_driver_irsa_role" {
   count   = local.irsa_enabled["s3_csi_driver"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.8.0"
+  version = "6.8.1"
 
   use_name_prefix = false
   name            = "${var.name}-s3-csi-driver-role"
@@ -635,7 +635,7 @@ module "s3_driver_irsa_role" {
 module "external_dns_irsa_role" {
   count   = local.irsa_enabled["external_dns"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.8.0"
+  version = "6.8.1"
 
   use_name_prefix = false
   name            = "${var.name}-external-dns-role"
@@ -658,7 +658,7 @@ module "external_dns_irsa_role" {
 module "cert_manager_irsa_role" {
   count   = local.irsa_enabled["cert_manager"] ? 1 : 0
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-  version = "6.8.0"
+  version = "6.8.1"
 
   use_name_prefix = false
   name            = "${var.name}-cert-manager-role"
