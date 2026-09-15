@@ -257,7 +257,7 @@ locals {
 
 module "vpc" {
   source                                 = "terraform-aws-modules/vpc/aws"
-  version                                = "6.6.1"
+  version                                = "6.7.2"
   name                                   = var.name
   create_vpc                             = var.existing_vpc == null
   enable_dns_hostnames                   = "true"
@@ -401,7 +401,7 @@ data "aws_region" "current" {}
 # https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/using-govcloud-vpc-endpoints.html
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
-  version = "6.6.1"
+  version = "6.7.2"
   count   = var.existing_vpc == null && length(var.vpc_endpoints) > 0 ? 1 : 0
 
   vpc_id = module.vpc.vpc_id
