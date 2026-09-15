@@ -441,7 +441,7 @@ module "vpc_endpoints" {
 
 module "eks" {
   source                        = "terraform-aws-modules/eks/aws"
-  version                       = "21.24.2"
+  version                       = "21.25.0"
   name                          = var.name
   kubernetes_version            = var.cluster_version
   create                        = var.create
@@ -525,7 +525,7 @@ data "aws_iam_policy_document" "source" {
 module "karpenter" {
   count                           = var.create ? 1 : 0
   source                          = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version                         = "21.24.2"
+  version                         = "21.25.0"
   enable_inline_policy            = true
   cluster_name                    = module.eks.cluster_name
   queue_name                      = var.name
@@ -703,7 +703,7 @@ data "aws_iam_policy_document" "pod_identity_target_role" {
 module "load_balancer_controller_pod_identity" {
   count   = local.pod_identity_enabled["load_balancer_controller"] ? 1 : 0
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "2.8.2"
+  version = "2.9.0"
 
   use_name_prefix               = false
   name                          = "${var.name}-alb-pod-identity-role"
@@ -730,7 +730,7 @@ module "load_balancer_controller_pod_identity" {
 module "ebs_csi_driver_pod_identity" {
   count   = local.pod_identity_enabled["ebs_csi_driver"] ? 1 : 0
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "2.8.2"
+  version = "2.9.0"
 
   use_name_prefix         = false
   name                    = "${var.name}-ebs-csi-driver-pod-identity-role"
@@ -757,7 +757,7 @@ module "ebs_csi_driver_pod_identity" {
 module "s3_csi_driver_pod_identity" {
   count   = local.pod_identity_enabled["s3_csi_driver"] ? 1 : 0
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "2.8.2"
+  version = "2.9.0"
 
   use_name_prefix               = false
   name                          = "${var.name}-s3-csi-driver-pod-identity-role"
@@ -787,7 +787,7 @@ module "s3_csi_driver_pod_identity" {
 module "external_dns_pod_identity" {
   count   = local.pod_identity_enabled["external_dns"] ? 1 : 0
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "2.8.2"
+  version = "2.9.0"
 
   use_name_prefix          = false
   name                     = "${var.name}-external-dns-pod-identity-role"
@@ -816,7 +816,7 @@ module "external_dns_pod_identity" {
 module "cert_manager_pod_identity" {
   count   = local.pod_identity_enabled["cert_manager"] ? 1 : 0
   source  = "terraform-aws-modules/eks-pod-identity/aws"
-  version = "2.8.2"
+  version = "2.9.0"
 
   use_name_prefix          = false
   name                     = "${var.name}-cert-manager-pod-identity-role"
