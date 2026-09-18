@@ -40,7 +40,12 @@ terraform.rc
 
 .idea/*
 
-# Devenv
-.devenv*
-devenv.local.nix
+# direnv
 .direnv
+# envrc is special unlike other .env files, it's needed for direnv to work
+!.envrc
+.env
+
+# nix
+result
+result-*

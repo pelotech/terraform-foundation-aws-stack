@@ -1,0 +1,11 @@
+# Dependabot owns flake.lock (Renovate's nix manager is disabled in renovate.json5 so the two
+# do not race on the same file). Everything else stays with Renovate.
+version: 2
+updates:
+  - package-ecosystem: "nix"
+    directory: "/"
+    open-pull-requests-limit: 20
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7

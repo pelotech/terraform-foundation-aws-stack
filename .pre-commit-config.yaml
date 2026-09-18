@@ -33,14 +33,10 @@ repos:
         - '--args=--severity=HIGH,CRITICAL'
         - '--args=--ignorefile=__GIT_WORKING_DIR__/.trivyignore'
         - '--args=--skip-dirs=**/.terraform'
-        # Use the checks embedded in the pinned Trivy binary instead of pulling
-        # the latest trivy-checks bundle (which can advance past the binary and
-        # fail to load — breaks CI on an empty cache).
-        #
-        # CAVEAT: this pins the check database to whatever shipped in the Trivy binary, and that
-        # binary's version is a `version:` INPUT to setup-trivy in pre-commit.yaml, not a `uses:`
-        # ref — so Renovate's github-actions manager does not see it. New checks therefore arrive
-        # only when someone bumps that input by hand.
+        # Use the checks embedded in the Trivy binary instead of pulling the latest trivy-checks
+        # bundle (which can advance past the binary and fail to load — breaks CI on an empty cache).
+        # The binary comes from the nix dev shell (flake.nix), so new checks arrive with
+        # Dependabot's flake.lock bumps.
         - '--args=--skip-check-update'
     - id: terraform_tflint
       args:
@@ -57,3 +53,11 @@ repos:
         - '--args=--only=terraform_required_providers'
         - '--args=--only=terraform_standard_module_structure'
         - '--args=--only=terraform_workspace_remote'
+- repo: https://github.com/kjanat/actionlint
+  rev: v1.17
+  hooks:
+    - id: actionlint
+- repo: https://github.com/zizmorcore/zizmor-pre-commit
+  rev: v1.30.1
+  hooks:
+    - id: zizmor
