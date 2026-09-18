@@ -27,10 +27,14 @@ jobs:
       - name: Comment dev shell closure diff
         run: |
           shell=devShells.x86_64-linux.default
-          base=$(nix build "github:${REPO}/${BASE_SHA}#${shell}" --no-link --print-out-paths)
           target=$(nix build ".#${shell}" --no-link --print-out-paths)
-          diff=$(nix store diff-closures "$base" "$target" | sed 's/\x1b\[[0-9;]*m//g')
-          if [ -n "$diff" ]; then diff=$'```\n'"$diff"$'\n```'; else diff='No dev shell packages changed.'; fi
+          # The base may predate the flake (first PR adding it); report the full closure then.
+          if base=$(nix build "github:${REPO}/${BASE_SHA}#${shell}" --no-link --print-out-paths 2>/dev/null); then
+            diff=$(nix store diff-closures "$base" "$target" | sed 's/\x1b\[[0-9;]*m//g')
+            if [ -n "$diff" ]; then diff=$'```\n'"$diff"$'\n```'; else diff='No dev shell packages changed.'; fi
+          else
+            diff=$'No dev shell at base (flake added in this PR). New closure:\n```\n'"$(nix path-info -r "$target" | sed 's|/nix/store/[a-z0-9]*-||' | sort -u)"$'\n```'
+          fi
           gh pr comment "${PR}" --repo "${REPO}" --body "$(printf '## Nix dev shell diff\n\n%s\n' "$diff")"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
