@@ -26,66 +26,18 @@ jobs:
           # Do not leave the token in .git/config; untrusted PR hooks run in
           # later steps. Write-back uses the GitHub API with GH_TOKEN instead.
           persist-credentials: false
-      - name: install pre-commit
-        run: pip install pre-commit
 
-      # NOTE: deliberately NOT Renovate-annotated. This is pinned to the required_version floor in
-      # versions.tf so CI proves that constraint is honest; auto-bumping it would silently stop
-      # testing the floor. Raise it by hand when versions.tf changes.
-      - name: Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+      # Every tool (prek, tflint, terraform-docs, trivy, hcledit, tenv) comes from flake.nix, so
+      # local and CI run the same versions and Dependabot bumps them via flake.lock. `terraform` is
+      # tenv's proxy: .terraform-version says `min-required`, so it installs the required_version
+      # floor from versions.tf and CI keeps proving that constraint is honest.
+      - uses: $/.github/actions/nix-devshell
         with:
-          terraform_version: "1.9.0"
-
-      - name: install hcledit
-        env:
-          # renovate: datasource=github-releases depName=minamijoyo/hcledit
-          HCLEDIT_VERSION: 0.2.18
-        run: |
-          set -euo pipefail
-          tmpdir=$(mktemp -d)
-          curl -sSLo "$tmpdir/hcledit.tar.gz" "https://github.com/minamijoyo/hcledit/releases/download/v${HCLEDIT_VERSION}/hcledit_${HCLEDIT_VERSION}_linux_amd64.tar.gz"
-          tar -xzf "$tmpdir/hcledit.tar.gz" -C "$tmpdir"
-          chmod +x "$tmpdir/hcledit"
-          sudo mv "$tmpdir/hcledit" /usr/local/bin/hcledit
-
-      # The official action rather than piping install_linux.sh into bash: this job later mints a
-      # write-capable app token. Note that pinning the *script* URL to a tag would not have helped
-      # — install_linux.sh resolves the tool version at runtime from the GitHub API unless
-      # TFLINT_VERSION is set, so a versioned script URL pins the script and not the binary.
-      - name: install tf-lint
-        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
-        with:
-          # renovate: datasource=github-releases depName=terraform-linters/tflint
-          tflint_version: v0.64.0
-          # Caches the plugin dir keyed on .tflint.hcl; the terraform ruleset is otherwise
-          # re-downloaded on every run.
-          cache: true
-
-      - name: install tf-docs
-        env:
-          # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
-          TERRAFORM_DOCS_VERSION: v0.24.0
-        run: |
-          set -euo pipefail
-          tmpdir=$(mktemp -d)
-          curl -sSLo "$tmpdir/terraform-docs.tar.gz" "https://terraform-docs.io/dl/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz"
-          tar -xzf "$tmpdir/terraform-docs.tar.gz" -C "$tmpdir"
-          chmod +x "$tmpdir/terraform-docs"
-          sudo mv "$tmpdir/terraform-docs" /usr/local/bin/terraform-docs
-
-      # The version input is not a `uses:` ref, so Renovate's github-actions manager cannot see it.
-      # Without the annotation below the pinned binary — and with --skip-check-update, its embedded
-      # check database — never advances.
-      - name: install trivy
-        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
-        with:
-          # renovate: datasource=github-releases depName=aquasecurity/trivy
-          version: v0.74.0
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Regenerate docs
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: pre-commit run terraform_docs --all-files || true
+        run: prek run terraform_docs --all-files || true
 
       - name: Check for docs changes
         id: docs
@@ -113,8 +65,8 @@ jobs:
       # Runs on every event and is the required status check. On the docs commit
       # (run #2) this re-runs and lands a green check on the head SHA. Untrusted
       # hooks run here, BEFORE any write-capable token exists.
-      - name: pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+      - name: prek
+        run: prek run --all-files --show-diff-on-failure
 
       - name: Generate app token
         id: app-token
@@ -126,6 +78,8 @@ jobs:
         with:
           app-id: ${{ vars.ORG_RELEASE_PLEASE_CLIENT_ID }}
           private-key: ${{ secrets.ORG_RELEASE_PLEASE_PRIVATE_KEY }}
+          # Scope the installation token to what ghcommit-action needs.
+          permission-contents: write
 
       - name: Commit docs changes back to PR branch (signed)
         if: >-

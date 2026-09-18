@@ -21,6 +21,9 @@ jobs:
         with:
           app-id: ${{ vars.ORG_RELEASE_PLEASE_CLIENT_ID }}
           private-key: ${{ secrets.ORG_RELEASE_PLEASE_PRIVATE_KEY }}
+          # Scope the installation token to what release-please needs.
+          permission-contents: write
+          permission-pull-requests: write
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         id: release
         with:

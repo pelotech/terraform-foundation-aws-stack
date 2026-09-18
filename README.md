@@ -536,6 +536,26 @@ Two things that will otherwise cost you an afternoon:
   partitions, so this needs real internet egress — relevant if you run a NAT-less topology via
   `vpc_endpoints`.
 
+## Local dev setup
+
+This repo uses [Nix](https://determinate.systems/nix/) + [direnv](https://direnv.net/) to provide every
+CLI the pre-commit hooks need (`terraform` via [tenv](https://github.com/tofuutils/tenv), `prek`,
+`tflint`, `terraform-docs`, `trivy`, `hcledit`, `yamllint`) — no manual tool installs.
+
+1. Install [Nix](https://determinate.systems/nix/) and [direnv](https://direnv.net/#basic-installation),
+   then run `direnv allow` in the repo root. Without direnv, enter the dev shell with `nix develop`.
+2. `terraform` on the PATH is tenv's proxy. `.terraform-version` says `min-required`, so tenv reads
+   the `required_version` floor in `versions.tf` and auto-installs that release — the same version CI
+   pins, so local runs prove the floor is honest. If you already have a newer compatible Terraform in
+   `~/.tenv`, tenv prefers it; run `tenv tf install min-required` once to pull the floor.
+3. Run the hooks with [prek](https://github.com/j178/prek), a drop-in `pre-commit` replacement that
+   reads the same `.pre-commit-config.yaml`:
+
+   ```bash
+   prek install --hook-type pre-commit --hook-type commit-msg
+   prek run --all-files
+   ```
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
