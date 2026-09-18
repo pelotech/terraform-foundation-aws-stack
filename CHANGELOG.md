@@ -1,5 +1,36 @@
 # Changelog
 
+## [9.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.0.1...v9.1.0) (2026-09-18)
+
+
+### Features
+
+* add nix dev shell with direnv, prek and tenv ([#177](https://github.com/pelotech/terraform-foundation-aws-stack/issues/177)) ([5f9daa3](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5f9daa3f99aaee9c8ef177d285d0a5b0ef09ee9f))
+* **kube-ovn-cni:** kube-ovn-controller node-pinning ([#166](https://github.com/pelotech/terraform-foundation-aws-stack/issues/166)) ([5689d1b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5689d1b2dbee0ecb603732d734ac491db932e212))
+
+
+### Bug Fixes
+
+* restore upstream fck-nat module at v1.6.1 ([#178](https://github.com/pelotech/terraform-foundation-aws-stack/issues/178)) ([8c37600](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8c3760075b42a3c964377fca7145af243c7d513e))
+
+
+### Chores
+
+* **deps:** update dependency aquasecurity/trivy to v0.74.0 ([#167](https://github.com/pelotech/terraform-foundation-aws-stack/issues/167)) ([0d0e398](https://github.com/pelotech/terraform-foundation-aws-stack/commit/0d0e398145560fb02f6809ca541a06634f2ca163))
+* **deps:** update dependency terraform-linters/tflint to v0.64.0 ([#160](https://github.com/pelotech/terraform-foundation-aws-stack/issues/160)) ([bcf5e79](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bcf5e79d501147c065ed884d41896411c22f96c4))
+* **deps:** update ghcr.io/kubeovn/charts/kube-ovn-v2 docker tag to v1.16.5 ([#179](https://github.com/pelotech/terraform-foundation-aws-stack/issues/179)) ([93aee57](https://github.com/pelotech/terraform-foundation-aws-stack/commit/93aee579db2585df3e18afdbeeedd6381b2668ed))
+* **deps:** update pre-commit hook adrienverge/yamllint to v1.38.0 ([#161](https://github.com/pelotech/terraform-foundation-aws-stack/issues/161)) ([a78b018](https://github.com/pelotech/terraform-foundation-aws-stack/commit/a78b01865c2bb4741fa436936edf76c5f8624c08))
+* **deps:** update pre-commit hook alessandrojcm/commitlint-pre-commit-hook to v9.26.0 ([#163](https://github.com/pelotech/terraform-foundation-aws-stack/issues/163)) ([830fa82](https://github.com/pelotech/terraform-foundation-aws-stack/commit/830fa8299a85ad622ea684a2f2163c75216338cb))
+* **deps:** update pre-commit hook antonbabenko/pre-commit-terraform to v1.109.1 ([#164](https://github.com/pelotech/terraform-foundation-aws-stack/issues/164)) ([ea698bf](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ea698bfe42f1705d7603bfd80b51fe00e923efe2))
+* **deps:** update pre-commit hook pre-commit/pre-commit-hooks to v6 ([#165](https://github.com/pelotech/terraform-foundation-aws-stack/issues/165)) ([8b770af](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8b770afe1e1912107387a962381003db837e6fc0))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v6.8.1 ([#170](https://github.com/pelotech/terraform-foundation-aws-stack/issues/170)) ([3bffaea](https://github.com/pelotech/terraform-foundation-aws-stack/commit/3bffaea42e007c0e879c5e00a4ffa90e4dbc8f3c))
+* **deps:** update terraform terraform-aws-modules/iam/aws to v6.8.2 ([#174](https://github.com/pelotech/terraform-foundation-aws-stack/issues/174)) ([1033aa0](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1033aa08b4531f84b1b68ce3f45a2f2b4fe105b4))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.16.0 ([#172](https://github.com/pelotech/terraform-foundation-aws-stack/issues/172)) ([de09ddf](https://github.com/pelotech/terraform-foundation-aws-stack/commit/de09ddfc3c6d172087dead6711e8d91367753591))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.16.1 ([#175](https://github.com/pelotech/terraform-foundation-aws-stack/issues/175)) ([b7f1b2a](https://github.com/pelotech/terraform-foundation-aws-stack/commit/b7f1b2a983f2925c2fedee3ceca34a023a0a1dcc))
+* **deps:** update terraform terraform-aws-modules/vpc/aws to v6.7.3 ([#169](https://github.com/pelotech/terraform-foundation-aws-stack/issues/169)) ([6fe1889](https://github.com/pelotech/terraform-foundation-aws-stack/commit/6fe1889d611dab6ca5956c74f40f46be4915105c))
+* **deps:** update terraform-aws-modules/eks ([#168](https://github.com/pelotech/terraform-foundation-aws-stack/issues/168)) ([9bad19e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/9bad19ece8b9715f70d008ff3b4101df59a5635d))
+* **deps:** update terraform-linters/setup-tflint action to v6.3.1 ([#171](https://github.com/pelotech/terraform-foundation-aws-stack/issues/171)) ([8fae7b5](https://github.com/pelotech/terraform-foundation-aws-stack/commit/8fae7b5212190ee4e3cd8047cb0161d3885342e3))
+
 ## [9.0.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.0.0...v9.0.1) (2026-08-07)
 
 
