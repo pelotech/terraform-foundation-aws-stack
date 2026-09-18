@@ -1,0 +1,31 @@
+# cni-bootstrap defaults for the kube-ovn-v2 chart. Override per-key via
+# helm_set or with later helm_values documents.
+%{ if service_cidr != "" ~}
+networking:
+  services:
+    cidr:
+      v4: "${service_cidr}"
+%{ endif ~}
+pinger:
+  targets:
+    externalAddresses:
+      v4: "8.8.8.8"
+    externalDomain:
+      v4: "google.com."
+%{ if master_label_key != "" ~}
+masterNodesLabels:
+  "${master_label_key}": "${master_label_value}"
+# Pin kube-ovn-controller onto the dedicated CNI node, alongside ovn-central
+# (pinned there by the chart via masterNodesLabels).
+controller:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - matchExpressions:
+          - key: "${master_label_key}"
+%{ if master_label_value != "" ~}
+            operator: In
+            values: ["${master_label_value}"]
+%{ else ~}
+            operator: Exists
+%{ endif ~}
+%{ endif ~}

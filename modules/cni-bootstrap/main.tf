@@ -1,6 +1,7 @@
 locals {
   # Built-in per-CNI defaults. `set` entries are merged (defaults first, then
-  # var.helm_set) so callers can layer overrides without redefining the base.
+  # var.helm_set) so callers can layer overrides without redefining the base;
+  # kube-ovn defaults render from values/<cni>.yaml.tftpl (--set still wins).
   # `timeout` is the per-CNI wait default (overridden by var.wait_timeout).
   cni_defaults = {
     cilium = {
@@ -26,10 +27,8 @@ locals {
     }
     "kube-ovn" = {
       release_name = "kube-ovn"
-      # OCI chart. Override via chart_version/helm_set/helm_values. ipv4.SVC_CIDR
-      # must match the cluster service CIDR — set from var.service_cidr (wire the
-      # foundation eks_cluster_service_cidr output). Pairs with the
-      # kube-ovn/role=master node label set by stack_cni="kube-ovn".
+      # Legacy v1 chart (env-style values). Pairs with the kube-ovn/role=master
+      # node label set by stack_cni="kube-ovn".
       repository = "oci://ghcr.io/pelotech/charts"
       chart      = "kube-ovn"
       # renovate: datasource=docker depName=ghcr.io/pelotech/charts/kube-ovn
@@ -37,20 +36,20 @@ locals {
       timeout       = 900  # 15m
       wait_default  = true # must read node IPs / schedule on the master node first
       wait_selector = "kube-ovn/role=master"
-      set = concat(
-        var.service_cidr != "" ? [{ name = "ipv4.SVC_CIDR", value = var.service_cidr }] : [],
-        [
-          { name = "ipv4.PINGER_EXTERNAL_ADDRESS", value = "8.8.8.8" },
-          { name = "ipv4.PINGER_EXTERNAL_DOMAIN", value = "google.com." },
-          { name = "func.ENABLE_KEEP_VM_IP", value = "false" },
-          { name = "kube-ovn-controller.requests.memory", value = "512Mi" },
-          { name = "kube-ovn-controller.limits.memory", value = "512Mi" },
-          { name = "ovs-ovn.requests.memory", value = "512Mi" },
-          { name = "ovs-ovn.limits.memory", value = "512Mi" },
-          { name = "pinger.requests.memory", value = "300Mi" },
-          { name = "pinger.limits.memory", value = "300Mi" },
-        ],
-      )
+      set           = []
+    }
+    "kube-ovn-v2" = {
+      # Upstream v2 chart (structured values). Same release name as v1 so a
+      # release installed via cni="custom" upgrades in place when switching.
+      release_name = "kube-ovn"
+      repository   = "oci://ghcr.io/kubeovn/charts"
+      chart        = "kube-ovn-v2"
+      # renovate: datasource=docker depName=ghcr.io/kubeovn/charts/kube-ovn-v2
+      version       = "v1.16.2"
+      timeout       = 900  # 15m
+      wait_default  = true # must read node IPs / schedule on the master node first
+      wait_selector = "kube-ovn/role=master"
+      set           = []
     }
     custom = {
       # Release name is decoupled from the chart name: optional release_name wins,
@@ -71,10 +70,30 @@ locals {
   wait_for_nodes = var.wait_for_nodes != null ? var.wait_for_nodes : local.selected.wait_default
   node_selector  = var.wait_for_nodes_selector != null ? var.wait_for_nodes_selector : local.selected.wait_selector
 
-  # kube-ovn pins ovn-central to the nodes matching MASTER_NODES_LABEL at deploy time —
-  # drive it from the same selector the register-poll uses (surge-ready: a generation-
-  # stamped value later targets a new node group without further module changes).
-  master_label_set = var.cni == "kube-ovn" ? [{ name = "MASTER_NODES_LABEL", value = local.node_selector }] : []
+  # kube-ovn pins its control plane to the master-labeled nodes — driven from the
+  # same selector the register-poll uses. v1 takes the raw string; v2 needs a
+  # key/value pair, so a non key=value selector yields "" and the v2 template
+  # falls back to the chart defaults.
+  master_label_parts = split("=", local.node_selector)
+  master_label_key   = length(local.master_label_parts) == 2 ? local.master_label_parts[0] : ""
+  master_label_value = length(local.master_label_parts) == 2 ? local.master_label_parts[1] : ""
+
+  # Default values documents (like -f), applied before var.helm_values so
+  # caller documents win.
+  cni_values = {
+    cilium = []
+    "kube-ovn" = [templatefile("${path.module}/values/kube-ovn.yaml.tftpl", {
+      service_cidr       = var.service_cidr
+      master_nodes_label = local.node_selector
+    })]
+    "kube-ovn-v2" = [templatefile("${path.module}/values/kube-ovn-v2.yaml.tftpl", {
+      service_cidr       = var.service_cidr
+      master_label_key   = local.master_label_key
+      master_label_value = local.master_label_value
+    })]
+    custom = []
+  }
+
   # Inert value that changes with bootstrap_generation so a bump forces `helm upgrade`
   # (re-reads the current master node IPs after a recycle). Charts ignore unknown keys.
   # NOTE: this only recycles the master correctly when there is a single matching node.
@@ -83,7 +102,8 @@ locals {
   # old master is still registered binds the stale node and re-applies the old IP (no-op).
   generation_set = var.bootstrap_generation != "" ? [{ name = "cniBootstrapGeneration", value = var.bootstrap_generation }] : []
 
-  set     = concat(local.selected.set, local.master_label_set, local.generation_set, var.helm_set)
+  set     = concat(local.selected.set, local.generation_set, var.helm_set)
+  values  = concat(local.cni_values[var.cni], var.helm_values)
   timeout = coalesce(var.wait_timeout, local.selected.timeout)
 }
 
@@ -129,7 +149,7 @@ resource "helm_release" "cni" {
   replace         = var.replace
 
   set    = local.set
-  values = var.helm_values
+  values = local.values
 
   depends_on = [terraform_data.wait_nodes]
 }
