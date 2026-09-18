@@ -19,6 +19,9 @@ concurrency:
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    env:
+      # Lowest release satisfying required_version in the working directory's .tf files.
+      TFENV_TERRAFORM_VERSION: min-required
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -26,26 +29,29 @@ jobs:
           # Do not leave the token in .git/config; untrusted PR hooks run in
           # later steps. Write-back uses the GitHub API with GH_TOKEN instead.
           persist-credentials: false
-      - name: install pre-commit
-        run: pip install pre-commit
+      # prek is a drop-in pre-commit runner (same .pre-commit-config.yaml). install-only: the job
+      # runs it twice below (docs regen, then the full check).
+      - name: install prek
+        uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+        with:
+          install-only: true
+          # renovate: datasource=github-releases depName=j178/prek
+          prek-version: 0.5.3
 
-      # CI runs the required_version floor so it proves that constraint is honest. Derived from
-      # versions.tf (no literal here for Renovate to bump); every versions.tf must agree on it.
-      - name: resolve terraform floor
-        id: tf
+      # tenv's terraform proxy resolves min-required (see TFENV_TERRAFORM_VERSION above) from
+      # required_version, so CI always runs the floor and proves that constraint is honest.
+      - name: install tenv
+        env:
+          # renovate: datasource=github-releases depName=tofuutils/tenv
+          TENV_VERSION: v4.15.1
         run: |
           set -euo pipefail
-          floors="$(git ls-files '*versions.tf' | xargs grep -hoE 'required_version[[:space:]]*=[[:space:]]*">=[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -u || true)"
-          if [ "$(printf '%s\n' "$floors" | grep -c .)" -ne 1 ]; then
-            echo "::error::expected one required_version floor (\">= X.Y.Z\") across versions.tf files, got: ${floors:-none}"
-            exit 1
-          fi
-          echo "version=$floors" >> "$GITHUB_OUTPUT"
-
-      - name: Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: ${{ steps.tf.outputs.version }}
+          tmpdir=$(mktemp -d)
+          curl -sSLo "$tmpdir/tenv.tar.gz" "https://github.com/tofuutils/tenv/releases/download/${TENV_VERSION}/tenv_${TENV_VERSION}_Linux_x86_64.tar.gz"
+          tar -xzf "$tmpdir/tenv.tar.gz" -C "$tmpdir"
+          sudo mv "$tmpdir/tenv" "$tmpdir/terraform" /usr/local/bin/
+          tenv tf install
+          terraform version
 
       - name: install hcledit
         env:
@@ -95,7 +101,7 @@ jobs:
 
       - name: Regenerate docs
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: pre-commit run terraform_docs --all-files || true
+        run: prek run terraform_docs --all-files || true
 
       - name: Check for docs changes
         id: docs
@@ -124,7 +130,7 @@ jobs:
       # (run #2) this re-runs and lands a green check on the head SHA. Untrusted
       # hooks run here, BEFORE any write-capable token exists.
       - name: pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+        run: prek run --all-files --show-diff-on-failure
 
       - name: Generate app token
         id: app-token
