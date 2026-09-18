@@ -92,6 +92,11 @@ run "kube_ovn_defaults" {
     condition     = yamldecode(output.resolved_values[0]).MASTER_NODES_LABEL == "kube-ovn/role=master"
     error_message = "kube-ovn must set MASTER_NODES_LABEL from the node selector in its default values document"
   }
+  # The v1 chart reads pinger resources from kube-ovn-pinger (a bare `pinger` key is a silent no-op).
+  assert {
+    condition     = yamldecode(output.resolved_values[0])["kube-ovn-pinger"].limits.memory == "300Mi"
+    error_message = "kube-ovn must size the pinger via the chart's kube-ovn-pinger key"
+  }
   assert {
     condition     = length(terraform_data.wait_nodes) == 1
     error_message = "kube-ovn must gate the install on node registration"

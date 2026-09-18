@@ -88,7 +88,7 @@ The next apply is then a real in-place `helm upgrade` to this module's
 chart/values. Before running it:
 
 - **Values are not carried over.** The upgrade applies chart defaults + this
-  module's `set` list only (no `--reuse-values`). Run
+  module's default values/`set` only (no `--reuse-values`). Run
   `helm get values -n <ns> <release>` and re-pass anything custom via
   `helm_set` / `helm_values`, or it silently reverts.
 - **Compare chart source and version.** kube-ovn installs
