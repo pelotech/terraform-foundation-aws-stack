@@ -368,12 +368,8 @@ resource "aws_eip" "main" {
 }
 
 module "fck_nat" {
-  # Temporary fork carrying RaJiska/terraform-aws-fck-nat#84 (partition-aware IAM ARNs) for GovCloud.
-  #
-  # REVERT TRIGGER: #84 merged 2026-08-01; waiting on a release. When an upstream tag >= v1.6.1
-  # exists, restore source = "RaJiska/fck-nat/aws" and delete this fork. Renovate cannot see a git::
-  # source with a non-semver tag, so nothing will nag us automatically.
-  source             = "git::https://github.com/josmo/terraform-aws-fck-nat.git?ref=v1.6.1-pre-josmo"
+  source             = "RaJiska/fck-nat/aws"
+  version            = "1.6.1"
   count              = var.pelotech_nat.enabled ? length(module.vpc.azs) : 0
   eip_allocation_ids = [aws_eip.main[count.index].allocation_id]
   name               = "${var.name}-${module.vpc.azs[count.index]}"
