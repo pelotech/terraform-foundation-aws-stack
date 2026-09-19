@@ -45,7 +45,7 @@ locals {
       repository   = "oci://ghcr.io/kubeovn/charts"
       chart        = "kube-ovn-v2"
       # renovate: datasource=docker depName=ghcr.io/kubeovn/charts/kube-ovn-v2
-      version       = "v1.16.5"
+      version       = "v1.16.6"
       timeout       = 900  # 15m
       wait_default  = true # must read node IPs / schedule on the master node first
       wait_selector = "kube-ovn/role=master"
