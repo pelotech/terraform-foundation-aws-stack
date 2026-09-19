@@ -173,6 +173,19 @@ module "cni_bootstrap" {
 > `masterNodesLabels`). The chart's structured values differ from v1's env-style
 > keys, so `helm_set`/`helm_values` overrides do not carry over between variants.
 >
+> Resource defaults match the infrastructure configuration: `central` requests
+> 1 CPU and 768Mi memory; `controller` requests and limits memory to 1536Mi;
+> `agent` requests and limits memory to 256Mi; and `ovsOvn` requests and limits
+> memory to 512Mi. Other resource settings retain the chart defaults. Callers
+> can override these per key through `helm_values` or `helm_set`.
+>
+> OVS updates use `RollingUpdate` with `maxSurge: 0` and `maxUnavailable: 1`.
+> This replaces the OVS pod on one node at a time without needing CPU capacity
+> for both the old and new pods, avoiding stalled rollouts on small nodes.
+> Networking on that node may be briefly interrupted during replacement.
+> Override `ovsOvn.updateStrategy` via `helm_values` or `helm_set` if nodes have
+> enough spare capacity for overlapping pods.
+>
 > Migrating a cluster that already runs the kube-ovn-v2 chart via `cni = "custom"`:
 > switch to `cni = "kube-ovn-v2"` and drop the `custom_chart` block — same release
 > name and chart, so the apply is an in-place `helm upgrade`. Compare your
