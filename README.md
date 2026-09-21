@@ -200,8 +200,11 @@ and at most one coredns replica is ever disrupted so its PDB is always satisfied
 > the cluster right after a recycle, it is exactly what the scheduler would otherwise pick. If you
 > override `addons.overrides["coredns"].configuration_values`, do not add a blanket
 > `{ operator = "Exists" }` toleration: that reintroduces the problem, and step 2 below would take
-> down DNS alongside `ovn-central`. Check the resolved value with the
-> `coredns_tolerations_resolved` output.
+> down DNS alongside `ovn-central`. The module always sets `configuration_values` (stock tolerations,
+> the profile's extra ones, and a node affinity that prefers managed node groups over Karpenter
+> nodes) because the provider keeps the addon's last stored value when the attribute is absent. An
+> override replaces the whole value, so restate what you keep. Check the resolved value with the
+> `coredns_configuration_values` output.
 
 **Breaking:** for `cni = "kube-ovn"` you must set **`cni_node.kubernetes_version`**
 (pin the CNI group's k8s version). This decouples it from `cluster_version`, so a
@@ -648,7 +651,8 @@ CLI the pre-commit hooks need (`terraform` via [tenv](https://github.com/tofuuti
 | <a name="output_cni_node_labels_resolved"></a> [cni\_node\_labels\_resolved](#output\_cni\_node\_labels\_resolved) | (introspection) Labels the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
 | <a name="output_cni_node_size"></a> [cni\_node\_size](#output\_cni\_node\_size) | Size of the dedicated CNI node group. Wire this into the cni-bootstrap module's wait\_for\_nodes\_count — if the two disagree the bootstrap poll hangs until wait\_for\_nodes\_timeout and fails the apply. 0 when no CNI node group is created. |
 | <a name="output_cni_node_taints_resolved"></a> [cni\_node\_taints\_resolved](#output\_cni\_node\_taints\_resolved) | (introspection) Taints the cni profile defines for the dedicated CNI node group. Derived from the profile alone, so this stays populated even when the group is not created (e.g. cni\_node.enabled = false) — use cni\_node\_group\_enabled to test for the group's existence. |
-| <a name="output_coredns_tolerations_resolved"></a> [coredns\_tolerations\_resolved](#output\_coredns\_tolerations\_resolved) | (introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means the addon's stock tolerations apply (which already cover CriticalAddonsOnly). |
+| <a name="output_coredns_configuration_values"></a> [coredns\_configuration\_values](#output\_coredns\_configuration\_values) | (introspection) The full configuration\_values the module sets on the coredns addon: stock tolerations plus the cni profile's, and an affinity that prefers managed node groups over Karpenter nodes. An addons.overrides["coredns"].configuration\_values replaces all of it. |
+| <a name="output_coredns_tolerations_resolved"></a> [coredns\_tolerations\_resolved](#output\_coredns\_tolerations\_resolved) | (introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means only the stock tolerations apply (CriticalAddonsOnly and the control-plane taint). |
 | <a name="output_database_subnet_group"></a> [database\_subnet\_group](#output\_database\_subnet\_group) | Name of the database subnet group created by this module (null when existing\_vpc is set) |
 | <a name="output_ebs_csi_driver_irsa_role_arn"></a> [ebs\_csi\_driver\_irsa\_role\_arn](#output\_ebs\_csi\_driver\_irsa\_role\_arn) | ARN of the EBS CSI driver IRSA role. Null when ebs\_csi\_driver is not on IRSA. |
 | <a name="output_ebs_csi_driver_role_arn"></a> [ebs\_csi\_driver\_role\_arn](#output\_ebs\_csi\_driver\_role\_arn) | ARN of the EBS CSI driver Pod Identity role |

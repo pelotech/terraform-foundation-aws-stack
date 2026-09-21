@@ -261,8 +261,13 @@ output "cni_node_group_enabled" {
 }
 
 output "coredns_tolerations_resolved" {
-  description = "(introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means the addon's stock tolerations apply (which already cover CriticalAddonsOnly)."
+  description = "(introspection) Tolerations added to the coredns addon beyond its own defaults, resolved from the cni profile. Empty means only the stock tolerations apply (CriticalAddonsOnly and the control-plane taint)."
   value       = local.coredns_tolerations
+}
+
+output "coredns_configuration_values" {
+  description = "(introspection) The full configuration_values the module sets on the coredns addon: stock tolerations plus the cni profile's, and an affinity that prefers managed node groups over Karpenter nodes. An addons.overrides[\"coredns\"].configuration_values replaces all of it."
+  value       = local.coredns_configuration
 }
 
 output "cni_node_size" {
