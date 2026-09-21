@@ -187,7 +187,7 @@ run "kube_ovn_v2_selector_override_drives_master_label" {
   }
 }
 
-run "kube_ovn_v2_non_kv_selector_falls_back_to_chart_defaults" {
+run "kube_ovn_v2_non_kv_selector_omits_node_affinity" {
   command = plan
 
   variables {
@@ -199,13 +199,14 @@ run "kube_ovn_v2_non_kv_selector_falls_back_to_chart_defaults" {
   }
 
   # A selector that isn't a single key=value can't map to a label — the values
-  # document must omit masterNodesLabels/controller so the chart defaults apply.
+  # document must omit masterNodesLabels/controller.nodeAffinity so the chart's
+  # node-affinity defaults apply while retaining the controller resource defaults.
   assert {
     condition     = !can(yamldecode(output.resolved_values[0]).masterNodesLabels)
     error_message = "a non key=value selector must not render masterNodesLabels"
   }
   assert {
-    condition     = !can(yamldecode(output.resolved_values[0]).controller)
+    condition     = !can(yamldecode(output.resolved_values[0]).controller.nodeAffinity)
     error_message = "a non key=value selector must not render the controller affinity"
   }
 }
