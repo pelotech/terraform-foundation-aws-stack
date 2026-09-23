@@ -1,5 +1,22 @@
 # Changelog
 
+## [9.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.1.0...v9.1.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* always set coredns addon configuration_values and prefer managed node groups ([#184](https://github.com/pelotech/terraform-foundation-aws-stack/issues/184)) ([54f7378](https://github.com/pelotech/terraform-foundation-aws-stack/commit/54f7378f51ec3894238d6d3b669ed97110a6cdb1))
+
+
+### Chores
+
+* **deps:** update ghcr.io/kubeovn/charts/kube-ovn-v2 docker tag to v1.16.6 ([#180](https://github.com/pelotech/terraform-foundation-aws-stack/issues/180)) ([e7deb3e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/e7deb3ea2e54f5a174cca878c98bd7c38f3640ef))
+* **deps:** update ghcr.io/kubeovn/charts/kube-ovn-v2 docker tag to v1.16.7 ([#185](https://github.com/pelotech/terraform-foundation-aws-stack/issues/185)) ([9f774ed](https://github.com/pelotech/terraform-foundation-aws-stack/commit/9f774ede683514f1454c49494b718ff07ea47465))
+* **deps:** update helm release cilium to v1.20.2 ([#149](https://github.com/pelotech/terraform-foundation-aws-stack/issues/149)) ([2b47354](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2b47354584c9d93e070cba35aebe12a7c4b907bc))
+* **deps:** update pre-commit hook alessandrojcm/commitlint-pre-commit-hook to v9.27.0 ([#182](https://github.com/pelotech/terraform-foundation-aws-stack/issues/182)) ([cd020fa](https://github.com/pelotech/terraform-foundation-aws-stack/commit/cd020fa147ddbc1faadd4ca25f6caca60b29dcc4))
+* **deps:** update terraform terraform-aws-modules/eks/aws to v21.25.3 ([#186](https://github.com/pelotech/terraform-foundation-aws-stack/issues/186)) ([dd3f173](https://github.com/pelotech/terraform-foundation-aws-stack/commit/dd3f17345a880f796abdb2e66373457321f18e98))
+* **kube-ovn-v2:** add resource defaults + ovs pod replacement ([#181](https://github.com/pelotech/terraform-foundation-aws-stack/issues/181)) ([a02b9b3](https://github.com/pelotech/terraform-foundation-aws-stack/commit/a02b9b31826e054463b15fae98fd270b6e519ded))
+
 ## [9.1.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.0.1...v9.1.0) (2026-09-18)
 
 
