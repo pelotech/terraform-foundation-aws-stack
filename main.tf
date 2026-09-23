@@ -98,16 +98,15 @@ locals {
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
     }
-    # tolerations REPLACES the addon's defaults rather than appending, so only set it when the
-    # profile needs something beyond stock (which already tolerates CriticalAddonsOnly).
-    "coredns" = merge({
+    # Always set: the provider treats configuration_values as Computed, so an absent value keeps
+    # whatever the addon stored last (the v8 blanket toleration outlived its removal that way).
+    "coredns" = {
       most_recent                 = true
       preserve                    = false
       resolve_conflicts_on_create = "OVERWRITE"
       resolve_conflicts_on_update = "OVERWRITE"
-      }, length(local.coredns_tolerations) > 0 ? {
-      configuration_values = jsonencode({ tolerations = local.coredns_tolerations })
-    } : {})
+      configuration_values        = jsonencode(local.coredns_configuration)
+    }
     # before_compute is a head start, not a graph edge: it skips the depends_on [node groups] the
     # regular addon resource carries. Without it the agent is created last, after every node group,
     # while the associations are created before them — so a node-group failure leaves associations
@@ -192,6 +191,41 @@ locals {
   coredns_tolerations     = local.cni_profile.coredns_tolerations
   cni_node_instance_types = coalesce(var.cni_node.instance_types, var.initial_node.instance_types)
   cni_node_is_arm         = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", local.cni_node_instance_types[0]))
+
+  # configuration_values replaces the addon's defaults, so the stock tolerations and affinity are
+  # restated here. The nodegroup preference keeps coredns off Karpenter nodes, which are drained
+  # and terminated by autoscaling; the initial group only rolls in place.
+  coredns_configuration = {
+    tolerations = concat([
+      { key = "CriticalAddonsOnly", operator = "Exists" },
+      { key = "node-role.kubernetes.io/control-plane", effect = "NoSchedule" },
+    ], local.coredns_tolerations)
+    affinity = {
+      nodeAffinity = {
+        requiredDuringSchedulingIgnoredDuringExecution = {
+          nodeSelectorTerms = [{
+            matchExpressions = [
+              { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
+              { key = "kubernetes.io/arch", operator = "In", values = ["amd64", "arm64"] },
+            ]
+          }]
+        }
+        preferredDuringSchedulingIgnoredDuringExecution = [{
+          weight     = 100
+          preference = { matchExpressions = [{ key = "eks.amazonaws.com/nodegroup", operator = "Exists" }] }
+        }]
+      }
+      podAntiAffinity = {
+        preferredDuringSchedulingIgnoredDuringExecution = [{
+          weight = 100
+          podAffinityTerm = {
+            labelSelector = { matchExpressions = [{ key = "k8s-app", operator = "In", values = ["kube-dns"] }] }
+            topologyKey   = "kubernetes.io/hostname"
+          }
+        }]
+      }
+    }
+  }
 
   node_group_common = {
     iam_role_use_name_prefix       = false
