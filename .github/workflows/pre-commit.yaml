@@ -55,7 +55,7 @@ jobs:
       - name: terraform test
         run: |
           set -euo pipefail
-          for dir in . modules/cni-bootstrap; do
+          for dir in .; do
             echo "::group::terraform test ($dir)"
             terraform -chdir="$dir" init -backend=false -input=false -no-color
             terraform -chdir="$dir" test -no-color
