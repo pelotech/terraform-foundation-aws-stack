@@ -11,19 +11,6 @@
   'pre-commit': {
     enabled: true,
   },
-  customManagers: [
-    {
-      // Helm chart versions in the cni-bootstrap defaults.
-      customType: 'regex',
-      managerFilePatterns: [
-        '/^modules/cni-bootstrap/main\\.tf$/',
-      ],
-      matchStrings: [
-        '#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+registryUrl=(?<registryUrl>\\S+))?[^\\n]*\\n\\s*version\\s*=\\s*"(?<currentValue>[^"]+)"',
-      ],
-      versioningTemplate: 'semver',
-    },
-  ],
   packageRules: [
     {
       description: 'Group terraform-aws-modules IAM updates together',
