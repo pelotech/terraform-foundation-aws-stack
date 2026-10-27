@@ -105,14 +105,15 @@ Install Kube-OVN per the
 
 On a CNI-less cluster (`cilium`/`kube-ovn`), the initial node group never reaches
 `Ready` until a CNI is installed, so `terraform apply` otherwise blocks ~60m on
-the node group before failing. The companion module `modules/cni-bootstrap`
+the node group before failing. The companion module
+[`terraform-helm-cni-bootstrap`](https://github.com/pelotech/terraform-helm-cni-bootstrap)
 installs the CNI via Helm **concurrently** with the node group: the agent
 DaemonSet (hostNetwork, tolerating `NotReady` + the `node.cilium.io/agent-not-ready`
 taint) lands on nodes as they register and flips them `Ready` inside the wait
 window — one apply, no swap.
 
-Configure a `helm` provider from this module's outputs and use the submodule.
-**Do not** make the submodule `depend_on` the node group, or they'd serialize and
+Configure a `helm` provider from this module's outputs and call that module.
+**Do not** make it `depend_on` the node group, or they'd serialize and
 the hang returns.
 
 ```hcl
@@ -129,7 +130,7 @@ provider "helm" {
 }
 
 module "cni_bootstrap" {
-  source           = "github.com/pelotech/terraform-foundation-aws-stack//modules/cni-bootstrap"
+  source           = "github.com/pelotech/terraform-helm-cni-bootstrap?ref=v1.0.0"
   cni              = "cilium" # cilium | kube-ovn | custom
   k8s_service_host = module.foundation.cilium_k8s_service_host # for cilium kube-proxy replacement
 }
@@ -143,7 +144,7 @@ register before installing (needs `aws`+`kubectl` on the apply host). Wire
 install races the nodes, and if it overcounts the poll hangs until `wait_for_nodes_timeout` and
 fails the apply.
 `cni = "custom"` installs any Helm-packaged CNI via `custom_chart`; layer extra
-values with `helm_set` / `helm_values`. See `modules/cni-bootstrap/README.md`.
+values with `helm_set` / `helm_values`. See the module's [README](https://github.com/pelotech/terraform-helm-cni-bootstrap#readme).
 As a safety net, set `initial_node = { ..., timeouts = { create = "20m" } }` so a failed
 bring-up fails fast instead of 60m. This replaces the imperative
 `helm upgrade --install` bootstrap step.
@@ -151,8 +152,8 @@ bring-up fails fast instead of 60m. This replaces the imperative
 > **Migrating an existing cluster** that already installed its CNI via
 > `helm install`? Import the release first or the apply fails with
 > `cannot re-use a name that is still in use` — see
-> ["Adopting an existing release"](modules/cni-bootstrap/README.md#adopting-an-existing-release-migrating-from-imperative-helm-install)
-> in the cni-bootstrap README.
+> ["Adopt an existing release"](https://github.com/pelotech/terraform-helm-cni-bootstrap#adopt-an-existing-release)
+> in the terraform-helm-cni-bootstrap README.
 
 ### Power-user overrides
 

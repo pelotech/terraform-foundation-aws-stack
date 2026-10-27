@@ -1,7 +1,41 @@
 # Upgrade guide
 
-Breaking changes and migration steps between major versions, newest first.
+Breaking changes and migration steps, newest first.
 General usage documentation lives in the [README](README.md).
+
+## Upgrading to v9.2.0
+
+### `modules/cni-bootstrap` moved to its own repository
+
+The CNI bootstrap module now lives in
+[pelotech/terraform-helm-cni-bootstrap](https://github.com/pelotech/terraform-helm-cni-bootstrap),
+which also supports Azure. This repository no longer ships `modules/cni-bootstrap`, so a call that
+still points at it fails `init` once its `ref` moves past v9.1.1. Change only the `source`. The
+inputs and outputs are the same:
+
+```hcl
+module "cni_bootstrap" {
+  # was github.com/pelotech/terraform-foundation-aws-stack//modules/cni-bootstrap?ref=v9.1.1
+  source = "github.com/pelotech/terraform-helm-cni-bootstrap?ref=v1.0.0"
+  # inputs unchanged
+}
+```
+
+The first plan after the switch shows these changes, all expected:
+
+- `terraform_data.wait_nodes` moves to `terraform_data.wait_for_nodes`, then is replaced because
+  its replace triggers now include the cluster name, region, node selector and node count. The node
+  poll runs once during the apply, so the apply host still needs `aws` and `kubectl`.
+- On `kube-ovn` and `kube-ovn-v2`, `helm_release.cni` updates in place because two comment lines
+  changed in the default values document. On kube-ovn-v2 the upgrade runs the chart's pre-upgrade
+  hook, which only sets `ovn-match-northd-version` on each `ovs-ovn` pod.
+- On `cilium` with `k8s_service_host` set, `helm_release.cni` updates in place because the same
+  `set` entries come in a different order.
+
+In each case the chart version and the effective values stay the same, so Helm applies the same
+manifests. One exception: a `kube-ovn-v2` call without `chart_version` moves from the old default
+v1.16.7 to v1.16.10, which is a real kube-ovn upgrade. Pin `chart_version` first if you want the
+switch and the upgrade in separate applies.
 
 ## Upgrading to v9.0.0 (breaking changes)
 
