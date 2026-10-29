@@ -1,5 +1,26 @@
 # Changelog
 
+## [9.2.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.1.1...v9.2.0) (2026-10-29)
+
+
+### Features
+
+* **cni-bootstrap:** use pelotech/terraform-helm-cni-bootstrap instead of the submodule ([#191](https://github.com/pelotech/terraform-foundation-aws-stack/issues/191)) ([870170d](https://github.com/pelotech/terraform-foundation-aws-stack/commit/870170d63a32cddc08342ee5e0d9c67ef5633492))
+
+
+### Chores
+
+* **deps:** bump flake-parts from `31729ca` to `024633c` ([#193](https://github.com/pelotech/terraform-foundation-aws-stack/issues/193)) ([1327a78](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1327a781e4f8ef21aaab01eee049f1b70e3a19c7))
+* **deps:** bump nixpkgs from `e554fab` to `55bfb4d` ([#200](https://github.com/pelotech/terraform-foundation-aws-stack/issues/200)) ([7b2b333](https://github.com/pelotech/terraform-foundation-aws-stack/commit/7b2b33336204803e3b6c32574de926fb5e172e29))
+* **deps:** update actions/create-github-app-token digest to 64ab729 ([#195](https://github.com/pelotech/terraform-foundation-aws-stack/issues/195)) ([e881d3e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/e881d3ecd357f66967ba974228b2a27f11f30c67))
+* **deps:** update cachix/install-nix-action action to v31.11.3 ([#196](https://github.com/pelotech/terraform-foundation-aws-stack/issues/196)) ([487bbd8](https://github.com/pelotech/terraform-foundation-aws-stack/commit/487bbd86024f2fcfa8cfaf66d38fcac2887aabcb))
+* **deps:** update ghcr.io/kubeovn/charts/kube-ovn-v2 docker tag to v1.16.15 ([#188](https://github.com/pelotech/terraform-foundation-aws-stack/issues/188)) ([2c88771](https://github.com/pelotech/terraform-foundation-aws-stack/commit/2c887717425a48948956403d1671ecc79f529170))
+* **deps:** update oras-project/setup-oras action to v2.0.3 ([#203](https://github.com/pelotech/terraform-foundation-aws-stack/issues/203)) ([5ab5775](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5ab5775505a674923468b2be1401a098f74d9dd0))
+* **deps:** update pre-commit hook antonbabenko/pre-commit-terraform to v1.109.3 ([#189](https://github.com/pelotech/terraform-foundation-aws-stack/issues/189)) ([5713dc3](https://github.com/pelotech/terraform-foundation-aws-stack/commit/5713dc361d840576249184c2fd794e36b282c454))
+* **deps:** update pre-commit hook zizmorcore/zizmor-pre-commit to v1.31.1 ([#197](https://github.com/pelotech/terraform-foundation-aws-stack/issues/197)) ([71d6578](https://github.com/pelotech/terraform-foundation-aws-stack/commit/71d657834fc0c551c039747d081393baa3c3d8fe))
+* **deps:** update terraform terraform-aws-modules/s3-bucket/aws to v5.17.0 ([#192](https://github.com/pelotech/terraform-foundation-aws-stack/issues/192)) ([35f0a5e](https://github.com/pelotech/terraform-foundation-aws-stack/commit/35f0a5ec4a45ddf3db258c373d8894bc985c589c))
+* publish each release as an OpenTofu module package to ghcr.io (J6) ([#202](https://github.com/pelotech/terraform-foundation-aws-stack/issues/202)) ([e6d1bfe](https://github.com/pelotech/terraform-foundation-aws-stack/commit/e6d1bfe8d88626267af6d643d30f03409644bc27))
+
 ## [9.1.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.1.0...v9.1.1) (2026-09-23)
 
 
