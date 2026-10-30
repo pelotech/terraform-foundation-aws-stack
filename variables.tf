@@ -489,6 +489,12 @@ variable "cluster_endpoint_public_access" {
   description = "Whether the EKS cluster API server endpoint is publicly accessible. Set to false for private-only access (requires VPC connectivity)."
 }
 
+variable "include_oidc_root_ca_thumbprint" {
+  type        = bool
+  default     = true
+  description = "Fetches the OIDC issuer certificate to set the IAM OIDC provider thumbprint. Set to false where the issuer is not reachable from where tofu runs, such as a VPC without internet access; IAM validates EKS issuers through its own trust store."
+}
+
 # TODO: resume usage of node security group; see: https://linear.app/pelotech/issue/PEL-97
 variable "create_node_security_group" {
   type        = bool
