@@ -1,5 +1,18 @@
 # Changelog
 
+## [9.3.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.2.0...v9.3.0) (2026-10-30)
+
+
+### Features
+
+* expose include_oidc_root_ca_thumbprint for stacks that plan without internet access ([#206](https://github.com/pelotech/terraform-foundation-aws-stack/issues/206)) ([538cb49](https://github.com/pelotech/terraform-foundation-aws-stack/commit/538cb4955eb7acab7b200d14504ba6d2c4bf5c88))
+
+
+### Chores
+
+* **deps:** bump nixpkgs from `55bfb4d` to `02c087f` ([#204](https://github.com/pelotech/terraform-foundation-aws-stack/issues/204)) ([ebb032c](https://github.com/pelotech/terraform-foundation-aws-stack/commit/ebb032ce98ab2d3f821ced5d56413d1d78b80d64))
+* **deps:** update pre-commit hook antonbabenko/pre-commit-terraform to v1.109.4 ([#205](https://github.com/pelotech/terraform-foundation-aws-stack/issues/205)) ([396ca0b](https://github.com/pelotech/terraform-foundation-aws-stack/commit/396ca0bef0022f05498733ab368049d9b780373d))
+
 ## [9.2.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.1.1...v9.2.0) (2026-10-29)
 
 
