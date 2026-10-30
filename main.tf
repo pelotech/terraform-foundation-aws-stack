@@ -485,7 +485,8 @@ module "eks" {
   addons                        = local.cluster_addons
   create_kms_key                = var.create_cluster_kms
   # Also gates the cluster's IAM OIDC provider, so disabling nulls eks_oidc_provider_arn.
-  enable_irsa = local.irsa_oidc_provider_enabled
+  enable_irsa                     = local.irsa_oidc_provider_enabled
+  include_oidc_root_ca_thumbprint = var.include_oidc_root_ca_thumbprint
   encryption_config = var.create_cluster_kms ? {
     "resources" : [
       "secrets"
