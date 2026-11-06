@@ -254,7 +254,6 @@ locals {
       local.enable_vpc_cni_addon ? [] : local.cloudinit_pre_nodeadm,
       var.pre_bootstrap_user_data != null && var.pre_bootstrap_user_data != "" ? [{ content_type = "text/x-shellscript", content = var.pre_bootstrap_user_data }] : [],
     )
-    pre_bootstrap_user_data      = var.pre_bootstrap_user_data
     iam_role_additional_policies = var.node_iam_additional_policies
     timeouts                     = var.initial_node.timeouts
   }
