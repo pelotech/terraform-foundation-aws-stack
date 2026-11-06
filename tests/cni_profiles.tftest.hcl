@@ -338,3 +338,16 @@ run "vpc_endpoints_s3_only" {
     error_message = "listing only s3 must create just the S3 (gateway) endpoint and nothing else"
   }
 }
+
+run "pre_bootstrap_user_data_becomes_al2023_shell_part" {
+  command = plan
+
+  variables {
+    pre_bootstrap_user_data = "#!/bin/bash\nupdate-ca-trust"
+  }
+
+  assert {
+    condition     = anytrue([for p in output.node_group_cloudinit_pre_nodeadm_resolved : p.content_type == "text/x-shellscript" && p.content == "#!/bin/bash\nupdate-ca-trust"])
+    error_message = "pre_bootstrap_user_data must reach AL2023 node groups as a text/x-shellscript cloud-init part; the eks module only renders it for AL2"
+  }
+}

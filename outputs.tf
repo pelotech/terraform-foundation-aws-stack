@@ -255,6 +255,11 @@ output "cluster_addons_enabled_resolved" {
   value       = local.cluster_addons_enabled
 }
 
+output "node_group_cloudinit_pre_nodeadm_resolved" {
+  description = "(introspection) cloud-init parts every managed node group runs ahead of nodeadm, after resolving the vpc-cni addon (maxPods NodeConfig) and pre_bootstrap_user_data (shell part)"
+  value       = local.node_group_common.cloudinit_pre_nodeadm
+}
+
 output "cni_node_group_enabled" {
   description = "(introspection) Whether the dedicated CNI node group is created (true for kube-ovn unless disabled)."
   value       = local.enable_cni_node_group
