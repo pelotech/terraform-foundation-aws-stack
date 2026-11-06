@@ -1,5 +1,18 @@
 # Changelog
 
+## [9.3.1](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.3.0...v9.3.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* apply pre_bootstrap_user_data to AL2023 node groups as a cloud-init shell part ([#210](https://github.com/pelotech/terraform-foundation-aws-stack/issues/210)) ([bdd133f](https://github.com/pelotech/terraform-foundation-aws-stack/commit/bdd133f0e68c161af4533678799ba3a902997478))
+
+
+### Chores
+
+* **deps:** bump nixpkgs from `02c087f` to `31ecbac` ([#209](https://github.com/pelotech/terraform-foundation-aws-stack/issues/209)) ([83a2393](https://github.com/pelotech/terraform-foundation-aws-stack/commit/83a2393e9e9b280593472f44cb41b076be8b06c7))
+* **deps:** update pre-commit hook zizmorcore/zizmor-pre-commit to v1.32.0 ([#208](https://github.com/pelotech/terraform-foundation-aws-stack/issues/208)) ([1c4336a](https://github.com/pelotech/terraform-foundation-aws-stack/commit/1c4336ab6cc737bc0b15f3876177a4cc32923333))
+
 ## [9.3.0](https://github.com/pelotech/terraform-foundation-aws-stack/compare/v9.2.0...v9.3.0) (2026-10-30)
 
 
