@@ -3,6 +3,49 @@
 Breaking changes and migration steps, newest first.
 General usage documentation lives in the [README](README.md).
 
+## Upgrading to v10.0.0
+
+### Access entries are keyed by principal ARN
+
+`access.*_arns` and `extra_access_entries` were keyed by list position (`admin_0`, `admin_ro_1`,
+`extra_0`, ...), so removing or reordering an ARN mid-list destroyed and recreated every entry after
+it. They are now keyed by the principal ARN, so adding, removing or reordering an ARN only touches
+that entry. Inputs are unchanged.
+
+**Do not bump without `moved` blocks.** Without them every access entry and policy association is
+destroyed and recreated under its new key. EKS allows one access entry per principal, and OpenTofu
+does not order the old-key destroys before the new-key creates, so the apply fails part-way with
+`ResourceInUseException`. Every principal (including the CI role applying the change) also loses
+cluster access until its entry is recreated. Bump by hand, not through a Renovate auto-merge.
+
+Upgrade each module call in one change:
+
+1. Generate the `moved` blocks from current state, once per module call (needs read access to
+   state; the old keys come from state, the new keys from each entry's `principal_arn`):
+
+   ```bash
+   MOD=module.core_prod   # your module call
+   tofu show -json | jq -r --arg m "$MOD.module.eks." '
+     [.. | objects | select(.address? // "" | startswith($m))
+          | select(.type == "aws_eks_access_entry" or .type == "aws_eks_access_policy_association")
+          | select(.index | test("^(admin_ro|admin|ro|extra)_[0-9]+"))]
+     | .[]
+     | (.address | split("[")[0]) as $r
+     | (if .type == "aws_eks_access_entry" then .values.principal_arn
+        else .values.principal_arn + "_" + (.index | capture("^(admin_ro|admin|ro|extra)_[0-9]+_(?<a>.+)$").a)
+        end) as $to
+     | "moved {\n  from = \($r)[\"\(.index)\"]\n  to   = \($r)[\"\($to)\"]\n}\n"'
+   ```
+
+2. Bump the `ref`/`version` to v10.0.0 and add the generated blocks next to the module call.
+3. Plan. It must show **only moves**: no access entry or policy association added, changed or
+   destroyed. Anything else means a block is missing or wrong; fix it before applying.
+4. Apply, then delete the `moved` blocks in a follow-up change.
+
+The `access` input now also rejects a principal ARN that appears more than once across
+`admin_arns`, `admin_ro_arns`, `ro_arns` and `extra_access_entries`. That configuration already
+failed at apply with `ResourceInUseException`; it now fails at plan.
+
 ## Upgrading to v9.2.0
 
 ### `modules/cni-bootstrap` moved to its own repository

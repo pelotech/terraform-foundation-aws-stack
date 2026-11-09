@@ -8,10 +8,10 @@ locals {
   # instance_types is validated, so index [0] is representative.
   initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_node.instance_types[0]))
 
-  # WARNING: the generated keys ("admin_0", "admin_ro_0", ...) are POSITIONAL state addresses.
-  # Removing or reordering an ARN mid-list re-keys every entry after it, which destroys and
-  # recreates those access entries. Append only. A duplicate ARN across groups also collides
-  # server-side (EKS keys access entries by principal ARN) and fails with ResourceInUseException.
+  # Access entries are keyed by principal ARN (EKS's own identity for an entry), so adding,
+  # removing or reordering an ARN only touches that entry. Before v10 they were keyed by list
+  # position ("admin_0", "extra_0", ...); see UPGRADING.md for the moved blocks. Duplicate ARNs
+  # are rejected by var.access validation.
   access_entry_groups = {
     admin    = { arns = var.access.admin_arns, assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
     admin_ro = { arns = var.access.admin_ro_arns, assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
@@ -19,7 +19,7 @@ locals {
   }
   managed_access_entries = merge([
     for group, cfg in local.access_entry_groups : {
-      for index, arn in cfg.arns : "${group}_${index}" => {
+      for arn in cfg.arns : arn => {
         principal_arn = arn
         policy_associations = {
           (cfg.assoc_key) = {
@@ -33,7 +33,7 @@ locals {
     }
   ]...)
   extra_access_entries = {
-    for index, item in var.extra_access_entries : "extra_${index}" => item
+    for item in var.extra_access_entries : item.principal_arn => item
   }
   s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 

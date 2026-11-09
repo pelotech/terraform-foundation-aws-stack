@@ -391,6 +391,17 @@ variable "access" {
   })
   default  = {}
   nullable = false
+
+  # Access entries are keyed by principal ARN (as EKS does), so a repeat would silently merge
+  # (or fail at apply with ResourceInUseException). Reject it at plan time instead.
+  validation {
+    error_message = "Each principal ARN may appear only once across access.admin_arns, access.admin_ro_arns, access.ro_arns and extra_access_entries."
+    condition = length(distinct(concat(
+      var.access.admin_arns, var.access.admin_ro_arns, var.access.ro_arns, [for e in var.extra_access_entries : e.principal_arn]
+      ))) == length(concat(
+      var.access.admin_arns, var.access.admin_ro_arns, var.access.ro_arns, [for e in var.extra_access_entries : e.principal_arn]
+    ))
+  }
 }
 
 variable "cni_node" {
