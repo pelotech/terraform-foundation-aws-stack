@@ -77,12 +77,12 @@ run "caller_keys_and_access_shorthand" {
   }
 }
 
-run "kms_administrators_are_admin_and_admin_ro" {
+run "kms_administrators_are_admin_only" {
   command = plan
 
   assert {
-    condition     = toset(local.kms_key_administrators) == toset(["arn:aws:iam::123456789012:role/ci", "arn:aws:iam::123456789012:role/auditor"])
-    error_message = "only admin and admin_ro entries are KMS key administrators"
+    condition     = toset(local.kms_key_administrators) == toset(["arn:aws:iam::123456789012:role/ci"])
+    error_message = "only access = admin entries are KMS key administrators"
   }
 }
 

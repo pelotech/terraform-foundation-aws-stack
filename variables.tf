@@ -347,7 +347,7 @@ variable "vpc" {
 }
 
 variable "access_entries" {
-  description = "EKS access entries, keyed by a stable name you choose (the key is the state address: renaming it replaces the entry). principal_arn: the IAM role. access: shorthand for one cluster-wide policy, \"admin\" (AmazonEKSClusterAdminPolicy), \"admin_ro\" (AmazonEKSAdminViewPolicy: view plus secrets and configmaps) or \"ro\" (AmazonEKSViewPolicy). kubernetes_groups / policy_associations: custom RBAC groups and policies, added to any access policy. KMS: entries with access \"admin\" or \"admin_ro\" are KMS key *administrators* on the cluster secrets key (including kms:PutKeyPolicy and kms:ScheduleKeyDeletion), so admin_ro is not read-only with respect to KMS; use policy_associations without access for least privilege."
+  description = "EKS access entries, keyed by a stable name you choose (the key is the state address: renaming it replaces the entry). principal_arn: the IAM role. access: shorthand for one cluster-wide policy, \"admin\" (AmazonEKSClusterAdminPolicy), \"admin_ro\" (AmazonEKSAdminViewPolicy: view plus secrets and configmaps) or \"ro\" (AmazonEKSViewPolicy). kubernetes_groups / policy_associations: custom RBAC groups and policies, added to any access policy. KMS: only entries with access \"admin\" are KMS key administrators on the cluster secrets key. Other principals read the key (Describe/Get/List) through their IAM policies, e.g. ReadOnlyAccess."
   type = map(object({
     principal_arn     = string
     access            = optional(string)

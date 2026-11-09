@@ -23,8 +23,8 @@ locals {
       policy_associations = merge(e.policy_associations, try(local.access_policy_associations[e.access], {}))
     })
   }
-  # admin and admin_ro are KMS key administrators on the cluster secrets key (see var.access_entries).
-  kms_key_administrators = [for e in var.access_entries : e.principal_arn if e.access == "admin" || e.access == "admin_ro"]
+  # Only access = "admin" entries are KMS key administrators on the cluster secrets key (see var.access_entries).
+  kms_key_administrators = [for e in var.access_entries : e.principal_arn if e.access == "admin"]
   s3_csi_arns            = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 
   # WARNING: deliberately NOT the upstream chart defaults (kube-system:ebs-csi-driver, not

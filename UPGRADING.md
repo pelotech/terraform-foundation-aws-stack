@@ -30,8 +30,15 @@ access_entries = {
 }
 ```
 
-KMS key administrators are unchanged: entries with `access = "admin"` or `"admin_ro"`. A
-`principal_arn` used by two entries is rejected at plan; it already failed at apply with
+**KMS key administrators are now only `access = "admin"` entries.** In v9, `admin_ro_arns` were
+also key administrators, which included `kms:PutKeyPolicy` and `kms:ScheduleKeyDeletion`, so
+"admin read-only" was not read-only. `admin_ro` entries now read the key (Describe/Get/List)
+through their IAM policies. The key policy keeps the `Default` root statement, so `ReadOnlyAccess`
+is enough for a CI `terraform plan`. Expect one in-place `aws_kms_key` policy update per cluster
+with `admin_ro` entries, with no key replacement and no re-encryption. If an `admin_ro` role has
+no IAM KMS read permissions, grant them in IAM.
+
+A `principal_arn` used by two entries is rejected at plan; it already failed at apply with
 `ResourceInUseException`.
 
 **Do not apply the bump without `moved` blocks.** Without them every access entry and policy
@@ -62,9 +69,10 @@ Upgrade each root in one change:
      | "moved {\n  from = \(.address)\n  to   = \($to)\n}\n"' > access_entries_moved.tf
    ```
 
-3. Plan again. It must show **only moves**: no access entry or policy association added, changed
-   or destroyed (except entries you are deliberately adding or removing). Anything else means a
-   block is missing; fix it before applying.
+3. Plan again. It must show **only moves**, plus one in-place `aws_kms_key` policy update if the
+   cluster has `admin_ro` entries: no access entry or policy association added, changed or
+   destroyed (except entries you are deliberately adding or removing). Anything else means a block
+   is missing; fix it before applying.
 4. Apply, then delete `access_entries_moved.tf` in a follow-up change.
 
 ## Upgrading to v9.2.0
