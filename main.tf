@@ -11,25 +11,20 @@ locals {
   # var.access_entries is keyed by caller-chosen names, so keys are known at plan time (even for a
   # computed principal_arn) and adding or removing an entry only touches that entry. `access` adds
   # one cluster-wide policy association on top of any custom policy_associations.
-  access_levels = {
-    admin    = { assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
-    admin_ro = { assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
-    ro       = { assoc_key = "view_only", policy = "AmazonEKSViewPolicy" }
+  eks_policy_prefix = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy"
+  access_policy_associations = {
+    admin    = { cluster_admin = { policy_arn = "${local.eks_policy_prefix}/AmazonEKSClusterAdminPolicy", access_scope = { type = "cluster" } } }
+    admin_ro = { admin_view_only = { policy_arn = "${local.eks_policy_prefix}/AmazonEKSAdminViewPolicy", access_scope = { type = "cluster" } } }
+    ro       = { view_only = { policy_arn = "${local.eks_policy_prefix}/AmazonEKSViewPolicy", access_scope = { type = "cluster" } } }
   }
+  # try(): access is null for custom-only entries (var validation rejects unknown levels).
   access_entries = {
-    for name, e in var.access_entries : name => {
-      principal_arn     = e.principal_arn
-      kubernetes_groups = e.kubernetes_groups
-      policy_associations = merge(e.policy_associations, {
-        for level in(e.access == null ? [] : [e.access]) : local.access_levels[level].assoc_key => {
-          policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/${local.access_levels[level].policy}"
-          access_scope = { type = "cluster", namespaces = null }
-        }
-      })
-    }
+    for name, e in var.access_entries : name => merge(e, {
+      policy_associations = merge(e.policy_associations, try(local.access_policy_associations[e.access], {}))
+    })
   }
   # admin and admin_ro are KMS key administrators on the cluster secrets key (see var.access_entries).
-  kms_key_administrators = [for e in var.access_entries : e.principal_arn if(e.access == null ? false : contains(["admin", "admin_ro"], e.access))]
+  kms_key_administrators = [for e in var.access_entries : e.principal_arn if e.access == "admin" || e.access == "admin_ro"]
   s3_csi_arns            = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 
   # WARNING: deliberately NOT the upstream chart defaults (kube-system:ebs-csi-driver, not
