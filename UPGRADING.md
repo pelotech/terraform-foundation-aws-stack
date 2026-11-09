@@ -3,6 +3,78 @@
 Breaking changes and migration steps, newest first.
 General usage documentation lives in the [README](README.md).
 
+## Upgrading to v10.0.0
+
+### `access` and `extra_access_entries` are replaced by `access_entries`
+
+Access entries were keyed by list position (`admin_0`, `admin_ro_1`, `extra_0`, ...), so removing or
+reordering an ARN mid-list destroyed and recreated every entry after it. They now come from one map,
+`access_entries`, keyed by names you choose. Adding or removing an entry only touches that entry,
+and the keys are known at plan time even when a `principal_arn` is computed in the same apply.
+
+| v9 | v10 |
+|----|-----|
+| `access.admin_arns = [arn]` | `access_entries = { <name> = { principal_arn = arn, access = "admin" } }` |
+| `access.admin_ro_arns = [arn]` | `... access = "admin_ro" }` |
+| `access.ro_arns = [arn]` | `... access = "ro" }` |
+| `extra_access_entries = [{ principal_arn, kubernetes_groups, policy_associations }]` | `access_entries = { <name> = { principal_arn, kubernetes_groups, policy_associations } }` (no `access`) |
+
+```hcl
+access_entries = {
+  ci      = { principal_arn = "arn:aws:iam::111111111111:role/gh-main", access = "admin" }
+  ci-plan = { principal_arn = "arn:aws:iam::111111111111:role/gh-pr-plan", access = "admin_ro" }
+  viewers = {
+    principal_arn     = "arn:aws:iam::111111111111:role/viewers"
+    kubernetes_groups = ["team:view"]
+  }
+}
+```
+
+**KMS key administrators are now only `access = "admin"` entries.** In v9, `admin_ro_arns` were
+also key administrators, which included `kms:PutKeyPolicy` and `kms:ScheduleKeyDeletion`, so
+"admin read-only" was not read-only. `admin_ro` entries now read the key (Describe/Get/List)
+through their IAM policies. The key policy keeps the `Default` root statement, so `ReadOnlyAccess`
+is enough for a CI `terraform plan`. Expect one in-place `aws_kms_key` policy update per cluster
+with `admin_ro` entries, with no key replacement and no re-encryption. If an `admin_ro` role has
+no IAM KMS read permissions, grant them in IAM.
+
+A `principal_arn` used by two entries is rejected at plan; it already failed at apply with
+`ResourceInUseException`.
+
+**Do not apply the bump without `moved` blocks.** Without them every access entry and policy
+association is destroyed and recreated under its new key. EKS allows one access entry per
+principal, and OpenTofu does not order the old-key destroys before the new-key creates, so the
+apply fails part-way with `ResourceInUseException`. Every principal (including the CI role applying
+the change) also loses cluster access until its entry is recreated. Bump by hand, not through a
+Renovate auto-merge.
+
+Upgrade each root in one change:
+
+1. Bump the `ref`/`version` to v10.0.0 and rewrite the access inputs as `access_entries`.
+2. Plan to a file (no apply) and generate the `moved` blocks from it. Each destroyed entry is
+   paired with the created entry for the same principal (and each association with the one for the
+   same principal and policy):
+
+   ```bash
+   tofu plan -lock=false -out=v10.tfplan
+   tofu show -json v10.tfplan | jq -r '
+     [.resource_changes[]
+       | select(.type == "aws_eks_access_entry" or .type == "aws_eks_access_policy_association")] as $rc
+     | ($rc | map(select(.change.actions == ["create"])
+             | {key: "\(.type)|\(.change.after.principal_arn)|\(.change.after.policy_arn // "")", value: .address})
+           | from_entries) as $new
+     | $rc[] | select(.change.actions == ["delete"])
+     | $new["\(.type)|\(.change.before.principal_arn)|\(.change.before.policy_arn // "")"] as $to
+     | select($to != null)
+     | "moved {\n  from = \(.address)\n  to   = \($to)\n}\n"' > access_entries_moved.tf
+   ```
+
+3. Plan again. It must show **only moves**, plus one in-place `aws_kms_key` policy update if the
+   cluster has `admin_ro` entries: no access entry or policy association added, changed or
+   destroyed (except entries you are deliberately adding or removing). Anything else means a block
+   is missing; fix it before applying.
+4. Apply, then delete `access_entries_moved.tf` in a follow-up change.
+
 ## Upgrading to v9.2.0
 
 ### `modules/cni-bootstrap` moved to its own repository
