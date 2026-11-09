@@ -346,9 +346,11 @@ variable "vpc" {
   }
 }
 
-variable "extra_access_entries" {
-  type = list(object({
+variable "access_entries" {
+  description = "EKS access entries, keyed by a stable name you choose (the key is the state address: renaming it replaces the entry). principal_arn: the IAM role. access: shorthand for one cluster-wide policy, \"admin\" (AmazonEKSClusterAdminPolicy), \"admin_ro\" (AmazonEKSAdminViewPolicy: view plus secrets and configmaps) or \"ro\" (AmazonEKSViewPolicy). kubernetes_groups / policy_associations: custom RBAC groups and policies, added to any access policy. KMS: entries with access \"admin\" or \"admin_ro\" are KMS key *administrators* on the cluster secrets key (including kms:PutKeyPolicy and kms:ScheduleKeyDeletion), so admin_ro is not read-only with respect to KMS; use policy_associations without access for least privilege."
+  type = map(object({
     principal_arn     = string
+    access            = optional(string)
     kubernetes_groups = optional(list(string))
     policy_associations = optional(map(object({
       policy_arn = string
@@ -357,17 +359,26 @@ variable "extra_access_entries" {
         namespaces = optional(list(string))
       })
     })), {})
-
   }))
-  description = "EKS access entries needed by IAM roles interacting with this cluster"
-  default     = []
+  default  = {}
+  nullable = false
+
+  validation {
+    error_message = "access must be \"admin\", \"admin_ro\", \"ro\" or unset."
+    condition     = alltrue([for e in var.access_entries : e.access == null ? true : contains(["admin", "admin_ro", "ro"], e.access)])
+  }
+
+  # EKS allows one access entry per principal; a repeat fails at apply with ResourceInUseException.
+  validation {
+    error_message = "Each principal_arn may appear in only one access entry."
+    condition     = length(distinct([for e in var.access_entries : e.principal_arn])) == length(var.access_entries)
+  }
 
   validation {
     error_message = "The access scope type can only be 'namespace' or 'cluster'"
-    # coalesce rather than a `== null ||` guard — see the note on cni_node.instance_types below.
     condition = alltrue([
-      for entry in var.extra_access_entries : alltrue([
-        for policy in values(coalesce(entry.policy_associations, {})) : contains(["namespace", "cluster"], policy.access_scope.type)
+      for e in var.access_entries : alltrue([
+        for policy in values(e.policy_associations) : contains(["namespace", "cluster"], policy.access_scope.type)
       ])
     ])
   }
@@ -375,32 +386,10 @@ variable "extra_access_entries" {
   validation {
     error_message = "The access scope type 'namespace' requires 'namespaces', namespaces can't be set otherwise."
     condition = alltrue([
-      for entry in var.extra_access_entries : alltrue([
-        for policy in values(coalesce(entry.policy_associations, {})) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) || policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
+      for e in var.access_entries : alltrue([
+        for policy in values(e.policy_associations) : ((policy.access_scope.type == "namespace" && policy.access_scope.namespaces != null) || policy.access_scope.type == "cluster" && policy.access_scope.namespaces == null)
       ])
     ])
-  }
-}
-
-variable "access" {
-  description = "IAM role ARNs granted cluster access. admin_arns: cluster admins. admin_ro_arns: admin read only with secret and configmap access. ro_arns: read only. KMS: admin_arns AND admin_ro_arns are both granted KMS key *administrator* on the cluster secrets key — that includes kms:PutKeyPolicy and kms:ScheduleKeyDeletion, so admin_ro_arns is not read-only with respect to KMS and can self-escalate or schedule the key for deletion. ro_arns receives no KMS access at all. For genuinely least-privilege access, use extra_access_entries instead of admin_ro_arns."
-  type = object({
-    admin_arns    = optional(list(string), [])
-    admin_ro_arns = optional(list(string), [])
-    ro_arns       = optional(list(string), [])
-  })
-  default  = {}
-  nullable = false
-
-  # Access entries are keyed by principal ARN (as EKS does), so a repeat would silently merge
-  # (or fail at apply with ResourceInUseException). Reject it at plan time instead.
-  validation {
-    error_message = "Each principal ARN may appear only once across access.admin_arns, access.admin_ro_arns, access.ro_arns and extra_access_entries."
-    condition = length(distinct(concat(
-      var.access.admin_arns, var.access.admin_ro_arns, var.access.ro_arns, [for e in var.extra_access_entries : e.principal_arn]
-      ))) == length(concat(
-      var.access.admin_arns, var.access.admin_ro_arns, var.access.ro_arns, [for e in var.extra_access_entries : e.principal_arn]
-    ))
   }
 }
 

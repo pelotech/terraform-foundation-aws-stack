@@ -8,34 +8,29 @@ locals {
   # instance_types is validated, so index [0] is representative.
   initial_is_arm = can(regex("[a-zA-Z]+\\d+g[a-z]*\\..+", var.initial_node.instance_types[0]))
 
-  # Access entries are keyed by principal ARN (EKS's own identity for an entry), so adding,
-  # removing or reordering an ARN only touches that entry. Before v10 they were keyed by list
-  # position ("admin_0", "extra_0", ...); see UPGRADING.md for the moved blocks. Duplicate ARNs
-  # are rejected by var.access validation.
-  access_entry_groups = {
-    admin    = { arns = var.access.admin_arns, assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
-    admin_ro = { arns = var.access.admin_ro_arns, assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
-    ro       = { arns = var.access.ro_arns, assoc_key = "view_only", policy = "AmazonEKSViewPolicy" }
+  # var.access_entries is keyed by caller-chosen names, so keys are known at plan time (even for a
+  # computed principal_arn) and adding or removing an entry only touches that entry. `access` adds
+  # one cluster-wide policy association on top of any custom policy_associations.
+  access_levels = {
+    admin    = { assoc_key = "cluster_admin", policy = "AmazonEKSClusterAdminPolicy" }
+    admin_ro = { assoc_key = "admin_view_only", policy = "AmazonEKSAdminViewPolicy" }
+    ro       = { assoc_key = "view_only", policy = "AmazonEKSViewPolicy" }
   }
-  managed_access_entries = merge([
-    for group, cfg in local.access_entry_groups : {
-      for arn in cfg.arns : arn => {
-        principal_arn = arn
-        policy_associations = {
-          (cfg.assoc_key) = {
-            policy_arn = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/${cfg.policy}"
-            access_scope = {
-              type = "cluster"
-            }
-          }
+  access_entries = {
+    for name, e in var.access_entries : name => {
+      principal_arn     = e.principal_arn
+      kubernetes_groups = e.kubernetes_groups
+      policy_associations = merge(e.policy_associations, {
+        for level in(e.access == null ? [] : [e.access]) : local.access_levels[level].assoc_key => {
+          policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/${local.access_levels[level].policy}"
+          access_scope = { type = "cluster", namespaces = null }
         }
-      }
+      })
     }
-  ]...)
-  extra_access_entries = {
-    for item in var.extra_access_entries : item.principal_arn => item
   }
-  s3_csi_arns = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
+  # admin and admin_ro are KMS key administrators on the cluster secrets key (see var.access_entries).
+  kms_key_administrators = [for e in var.access_entries : e.principal_arn if(e.access == null ? false : contains(["admin", "admin_ro"], e.access))]
+  s3_csi_arns            = compact(concat([module.s3_csi.s3_bucket_arn], var.s3_csi.bucket_arns))
 
   # WARNING: deliberately NOT the upstream chart defaults (kube-system:ebs-csi-driver, not
   # ebs-csi-controller-sa; alb, not kube-system). These pairs must match what the IRSA roles already
@@ -495,7 +490,7 @@ module "eks" {
       "secrets"
     ]
   } : {}
-  kms_key_administrators = var.create_cluster_kms ? concat(var.access.admin_arns, var.access.admin_ro_arns) : []
+  kms_key_administrators = var.create_cluster_kms ? local.kms_key_administrators : []
   eks_managed_node_groups = merge(
     # Follows the control-plane version and rolls in place on upgrade.
     var.initial_node.enabled ? {
@@ -525,7 +520,7 @@ module "eks" {
       })
     } : {},
   )
-  access_entries = merge(local.managed_access_entries, local.extra_access_entries)
+  access_entries = local.access_entries
   tags = merge(var.tags, {
     # At most one security group per account may carry this tag.
     "karpenter.sh/discovery" = var.name

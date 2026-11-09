@@ -5,46 +5,67 @@ General usage documentation lives in the [README](README.md).
 
 ## Upgrading to v10.0.0
 
-### Access entries are keyed by principal ARN
+### `access` and `extra_access_entries` are replaced by `access_entries`
 
-`access.*_arns` and `extra_access_entries` were keyed by list position (`admin_0`, `admin_ro_1`,
-`extra_0`, ...), so removing or reordering an ARN mid-list destroyed and recreated every entry after
-it. They are now keyed by the principal ARN, so adding, removing or reordering an ARN only touches
-that entry. Inputs are unchanged.
+Access entries were keyed by list position (`admin_0`, `admin_ro_1`, `extra_0`, ...), so removing or
+reordering an ARN mid-list destroyed and recreated every entry after it. They now come from one map,
+`access_entries`, keyed by names you choose. Adding or removing an entry only touches that entry,
+and the keys are known at plan time even when a `principal_arn` is computed in the same apply.
 
-**Do not bump without `moved` blocks.** Without them every access entry and policy association is
-destroyed and recreated under its new key. EKS allows one access entry per principal, and OpenTofu
-does not order the old-key destroys before the new-key creates, so the apply fails part-way with
-`ResourceInUseException`. Every principal (including the CI role applying the change) also loses
-cluster access until its entry is recreated. Bump by hand, not through a Renovate auto-merge.
+| v9 | v10 |
+|----|-----|
+| `access.admin_arns = [arn]` | `access_entries = { <name> = { principal_arn = arn, access = "admin" } }` |
+| `access.admin_ro_arns = [arn]` | `... access = "admin_ro" }` |
+| `access.ro_arns = [arn]` | `... access = "ro" }` |
+| `extra_access_entries = [{ principal_arn, kubernetes_groups, policy_associations }]` | `access_entries = { <name> = { principal_arn, kubernetes_groups, policy_associations } }` (no `access`) |
 
-Upgrade each module call in one change:
+```hcl
+access_entries = {
+  ci      = { principal_arn = "arn:aws:iam::111111111111:role/gh-main", access = "admin" }
+  ci-plan = { principal_arn = "arn:aws:iam::111111111111:role/gh-pr-plan", access = "admin_ro" }
+  viewers = {
+    principal_arn     = "arn:aws:iam::111111111111:role/viewers"
+    kubernetes_groups = ["team:view"]
+  }
+}
+```
 
-1. Generate the `moved` blocks from current state, once per module call (needs read access to
-   state; the old keys come from state, the new keys from each entry's `principal_arn`):
+KMS key administrators are unchanged: entries with `access = "admin"` or `"admin_ro"`. A
+`principal_arn` used by two entries is rejected at plan; it already failed at apply with
+`ResourceInUseException`.
+
+**Do not apply the bump without `moved` blocks.** Without them every access entry and policy
+association is destroyed and recreated under its new key. EKS allows one access entry per
+principal, and OpenTofu does not order the old-key destroys before the new-key creates, so the
+apply fails part-way with `ResourceInUseException`. Every principal (including the CI role applying
+the change) also loses cluster access until its entry is recreated. Bump by hand, not through a
+Renovate auto-merge.
+
+Upgrade each root in one change:
+
+1. Bump the `ref`/`version` to v10.0.0 and rewrite the access inputs as `access_entries`.
+2. Plan to a file (no apply) and generate the `moved` blocks from it. Each destroyed entry is
+   paired with the created entry for the same principal (and each association with the one for the
+   same principal and policy):
 
    ```bash
-   MOD=module.core_prod   # your module call
-   tofu show -json | jq -r --arg m "$MOD.module.eks." '
-     [.. | objects | select(.address? // "" | startswith($m))
-          | select(.type == "aws_eks_access_entry" or .type == "aws_eks_access_policy_association")
-          | select(.index | test("^(admin_ro|admin|ro|extra)_[0-9]+"))]
-     | .[]
-     | (.address | split("[")[0]) as $r
-     | (if .type == "aws_eks_access_entry" then .values.principal_arn
-        else .values.principal_arn + "_" + (.index | capture("^(admin_ro|admin|ro|extra)_[0-9]+_(?<a>.+)$").a)
-        end) as $to
-     | "moved {\n  from = \($r)[\"\(.index)\"]\n  to   = \($r)[\"\($to)\"]\n}\n"'
+   tofu plan -lock=false -out=v10.tfplan
+   tofu show -json v10.tfplan | jq -r '
+     [.resource_changes[]
+       | select(.type == "aws_eks_access_entry" or .type == "aws_eks_access_policy_association")] as $rc
+     | ($rc | map(select(.change.actions == ["create"])
+             | {key: "\(.type)|\(.change.after.principal_arn)|\(.change.after.policy_arn // "")", value: .address})
+           | from_entries) as $new
+     | $rc[] | select(.change.actions == ["delete"])
+     | $new["\(.type)|\(.change.before.principal_arn)|\(.change.before.policy_arn // "")"] as $to
+     | select($to != null)
+     | "moved {\n  from = \(.address)\n  to   = \($to)\n}\n"' > access_entries_moved.tf
    ```
 
-2. Bump the `ref`/`version` to v10.0.0 and add the generated blocks next to the module call.
-3. Plan. It must show **only moves**: no access entry or policy association added, changed or
-   destroyed. Anything else means a block is missing or wrong; fix it before applying.
-4. Apply, then delete the `moved` blocks in a follow-up change.
-
-The `access` input now also rejects a principal ARN that appears more than once across
-`admin_arns`, `admin_ro_arns`, `ro_arns` and `extra_access_entries`. That configuration already
-failed at apply with `ResourceInUseException`; it now fails at plan.
+3. Plan again. It must show **only moves**: no access entry or policy association added, changed
+   or destroyed (except entries you are deliberately adding or removing). Anything else means a
+   block is missing; fix it before applying.
+4. Apply, then delete `access_entries_moved.tf` in a follow-up change.
 
 ## Upgrading to v9.2.0
 
